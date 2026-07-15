@@ -154,6 +154,8 @@ const GraphCanvas = () => {
             connectionMode={ConnectionMode.Loose}
             defaultEdgeOptions={defaultEdgeOptions}
             fitView
+            minZoom={0.005}
+            maxZoom={2}
             snapToGrid
             snapGrid={[16, 16]}
             deleteKeyCode="Delete"
