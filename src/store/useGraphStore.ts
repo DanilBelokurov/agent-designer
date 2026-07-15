@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { addEdge, applyNodeChanges, applyEdgeChanges } from 'reactflow';
 import type { Node, Edge, Connection, NodeChange, EdgeChange } from 'reactflow';
 import type { NodeType, AppNode, AppEdge, NodeConfig } from '../types';
+import type { PositionMap } from '../utils/autoLayout';
 
 let nodeIdCounter = 1;
 let edgeIdCounter = 1;
@@ -37,6 +38,7 @@ interface GraphState {
   exportProject: () => string;
   importProject: (json: string) => void;
   clearGraph: () => void;
+  setNodesPositions: (positions: PositionMap) => void;
 }
 
 export const useGraphStore = create<GraphState>((set, get) => ({
@@ -175,6 +177,16 @@ export const useGraphStore = create<GraphState>((set, get) => ({
 
   clearGraph: () => {
     set({ nodes: [], edges: [], selectedNodeId: null });
+  },
+
+  setNodesPositions: (positions) => {
+    set({
+      nodes: get().nodes.map((n) => {
+        const pos = positions[n.id];
+        if (!pos) return n;
+        return { ...n, position: pos };
+      }),
+    });
   },
 }));
 

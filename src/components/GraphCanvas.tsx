@@ -2,6 +2,7 @@ import { useCallback, useRef, useMemo } from 'react';
 import ReactFlow, {
   Background,
   Controls,
+  ControlButton,
   MiniMap,
   ConnectionMode,
   useReactFlow,
@@ -10,6 +11,7 @@ import ReactFlow, {
 } from 'reactflow';
 import type { Node } from 'reactflow';
 import 'reactflow/dist/style.css';
+import { Workflow } from 'lucide-react';
 
 import { useGraphStore } from '../store/useGraphStore';
 import { OrchestratorNode, SubAgentNode, SkillNode } from './nodes';
@@ -17,6 +19,7 @@ import NodePalette from './panels/NodePalette';
 import PropertiesPanel from './panels/PropertiesPanel';
 import Toolbar from './Toolbar';
 import type { NodeType } from '../types';
+import { autoLayout } from '../utils/autoLayout';
 
 const nodeTypes = {
   orchestrator: OrchestratorNode,
@@ -37,8 +40,8 @@ const defaultEdgeOptions = {
 
 const GraphCanvas = () => {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
-  const { screenToFlowPosition } = useReactFlow();
-  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, addNode, selectNode } = useGraphStore();
+  const { screenToFlowPosition, fitView } = useReactFlow();
+  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, addNode, selectNode, setNodesPositions } = useGraphStore();
 
   const onDragStart = useCallback(
     (event: React.DragEvent, nodeType: NodeType) => {
@@ -80,6 +83,15 @@ const GraphCanvas = () => {
   const onPaneClick = useCallback(() => {
     selectNode(null);
   }, [selectNode]);
+
+  const handleAutoLayout = useCallback(() => {
+    if (nodes.length === 0) return;
+    const positions = autoLayout(nodes, edges);
+    setNodesPositions(positions);
+    requestAnimationFrame(() => {
+      fitView({ duration: 400, padding: 0.1 });
+    });
+  }, [nodes, edges, setNodesPositions, fitView]);
 
   const isValidConnection = useCallback((connection: { source: string | null; target: string | null }) => {
     if (!connection.source || !connection.target) return false;
@@ -155,12 +167,23 @@ const GraphCanvas = () => {
               color="#334155"
               className="opacity-30"
             />
-            <Controls 
+            <Controls
               className="!bg-slate-900/90 !border-slate-700/50 !shadow-2xl !rounded-xl overflow-hidden"
               showZoom
               showFitView
               showInteractive={false}
-            />
+            >
+              <div className="h-px bg-slate-700/50 mx-2" />
+              <ControlButton
+                onClick={handleAutoLayout}
+                title="Auto layout (hierarchy)"
+                aria-label="Auto layout"
+                disabled={nodes.length === 0}
+                className="!text-indigo-300 hover:!bg-indigo-500/20 hover:!text-indigo-200 disabled:!opacity-40"
+              >
+                <Workflow className="w-4 h-4" />
+              </ControlButton>
+            </Controls>
             <MiniMap
               className="!bg-slate-900/90 !border-slate-700/50 !rounded-xl !shadow-2xl"
               nodeColor={minimapNodeColor}
