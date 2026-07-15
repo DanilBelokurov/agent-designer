@@ -45,8 +45,11 @@ agent-graph-designer/
 ├── postcss.config.js
 ├── .oxlintrc.json
 ├── base-config.json                  # pre-built sample project (213 nodes)
+├── public/
+│   └── grammars/                     # tree-sitter WASM (runtime + per-language grammars)
 ├── scripts/
-│   └── generate-base-config.cjs      # Node script that builds base-config.json
+│   ├── generate-base-config.cjs      # Node script that builds base-config.json
+│   └── fetch-grammars.cjs            # vendor tree-sitter WASM into public/grammars/
 ├── server/
 │   └── server.js                     # local bridge: POST /generate → `qwen -p`
 ├── src/
@@ -57,17 +60,28 @@ agent-graph-designer/
 │   │   └── index.ts                  # NodeType, NodeConfig (incl. instructionFilePath), AppNode, AppEdge, Project
 │   ├── store/
 │   │   ├── useGraphStore.ts          # graph state (nodes, edges, selection)
-│   │   └── useFileSystemStore.ts     # picked project folder + error state
+│   │   ├── useFileSystemStore.ts     # picked project folder + error state
+│   │   └── useCodeGraphStore.ts      # code-graph snapshot + scan progress
 │   ├── services/
 │   │   ├── qwenClient.ts             # fetch wrapper around the bridge /generate
 │   │   ├── fileSystem.ts             # FS Access API + download fallback
-│   │   └── instructionGenerator.ts   # prompt assembly + per-node path derivation
+│   │   ├── instructionGenerator.ts   # prompt assembly + per-node path derivation
+│   │   └── treeSitter/
+│   │       ├── loader.ts             # WASM runtime + grammar fetch/IDB cache
+│   │       ├── codeGraph.ts          # CodeEntity/CodeRelation/ParseResult types
+│   │       ├── codeGraphStore.ts     # in-memory graph mutation helpers
+│   │       ├── tsExtractor.ts        # tree-sitter AST walker (TS/JS/Python)
+│   │       ├── regexExtractor.ts     # regex-based fallback parser
+│   │       ├── codeParserSelector.ts # tries tree-sitter, falls back to regex
+│   │       ├── folderScanner.ts      # walks the picked FS handle into the graph
+│   │       └── contextCollector.ts   # pick + format relevant entities for a node
 │   ├── utils/
 │   │   └── autoLayout.ts             # hierarchical top-down layout algorithm
 │   └── components/
 │       ├── GraphCanvas.tsx           # top-level layout, hosts ReactFlow
 │       ├── Toolbar.tsx               # top bar (project name, import/export, codegen)
 │       ├── InstructionGeneratorDialog.tsx # modal invoked from PropertiesPanel
+│       ├── CodeGraphToolbarButton.tsx # floating panel for triggering code-graph scans
 │       ├── nodes/
 │       │   ├── index.ts              # re-exports the three node components
 │       │   ├── OrchestratorNode.tsx  # indigo gradient, target handle top, source bottom
@@ -343,4 +357,103 @@ return a richer prompt body — the dialog already passes the right inputs.
 | Bridge down | Red error: "Cannot reach qwen bridge at http://localhost:3001 …" |
 | Browser without FS Access | Folder picker hidden; Save button labelled "Save & download"; file is downloaded via the browser. |
 | Folder picked without write permission | Dialog surfaces "You did not grant write access. Re-pick the folder and allow modification." |
+
+---
+
+## 13. Code-graph (tree-sitter integration)
+
+Optional feature that walks the picked project folder, parses each supported
+file, and builds an in-memory graph of code entities (classes / functions /
+methods / interfaces / imports). When you generate an instruction, matching
+entities are pulled into the prompt as Markdown snippets, so Qwen writes from
+real signatures and doc comments rather than guessing.
+
+### Two-tier parser
+
+The codebase exposes a unified `runParserForFile(path, source)` in
+`services/treeSitter/codeParserSelector.ts`. It tries tree-sitter first
+(`TreeSitterCodeParser.parseFile`) and silently falls back to
+`RegexCodeParser.parse` if the grammar WASM for the file's language is not
+available. Both parsers implement `CodeParser` and return the same
+`ParseResult` shape (defined in `codeGraph.ts`).
+
+The `CodeParser` interface is the seam — you can swap in another backend
+(e.g. a worker offload, an LLM-based extractor) without touching the
+graph, store, scanner, or the instruction generator.
+
+### Tree-sitter loading
+
+`services/treeSitter/loader.ts`:
+- Calls `Parser.init({ locateFile })` once on first use, pointing it at
+  `/grammars/web-tree-sitter.wasm` so the runtime can self-locate.
+- `getLanguage(lang)` fetches the per-language WASM (cached in an
+  IndexedDB store `agent-designer-grammar-cache`), wraps the bytes in a
+  `Uint8Array`, and feeds them to `Parser.Language.load`.
+- `detectAvailableGrammars()` does a HEAD request for each known grammar
+  URL so the UI can label "tree-sitter available" / "regex fallback" without
+  paying the cost of actually loading.
+
+To add a new language: drop the `.wasm` into `public/grammars/`, list it in
+`LANGUAGE_GRAMMARS` in `scripts/fetch-grammars.cjs`, add a row to `GRAMMARS`
+in `loader.ts` with the file extension list, and (optionally) add extractor
+rules to `tsExtractor.ts`.
+
+### Folder scanner
+
+`services/treeSitter/folderScanner.ts` walks the picked
+`FileSystemDirectoryHandle` recursively (skipping `node_modules`, `.git`,
+`dist`, `coverage`, …), filters by extension, reads each file via the FS
+Access API, and feeds it to the parser selector. It runs in chunks of 25
+files, yielding to the UI thread between batches and reporting progress
+through `onProgress`. The graph entity store merges results per file so a
+re-scan replaces the previous run cleanly.
+
+### Data model
+
+`CodeGraphSnapshot` (in `codeGraphStore.ts`) holds:
+- `entitiesById`: `Record<string, CodeEntity>` — code-graph nodes.
+- `entitiesByFile`: `Record<string, string[]>` — keeps file→entity mapping
+  so re-scanning a single file is local.
+- `relations`: array of `CodeRelation` (edges like `contains`, `imports`,
+  etc.).
+- `parsedAt`, `rootPath`: metadata.
+
+The Zustand `useCodeGraphStore` wraps this snapshot in UI state (phase,
+progress, parserUsed) and persists the snapshot to IndexedDB on every
+`replaceGraph` call so reloading the page doesn't pay the scan cost twice.
+
+### Context assembly
+
+`services/treeSitter/contextCollector.ts`:
+- `codeNameCandidates(node)` derives a normalised set of likely code names
+  from the node's label (and `functionName` for skills, or the first
+  meaningful tokens of `instructions` for agents).
+- `collectContextForNode(node, graph)` scores each entity against the
+  candidates (exact match = 10, substring match = 4, plus a small penalty
+  for trivial accessors), takes the top 5, and renders them as a Markdown
+  block with signature, file:line, doc comment, and truncated body in a
+  fenced code block.
+
+`buildPromptForNode` in `services/instructionGenerator.ts` now accepts a
+`codeContext` option, which it inserts under `## Project Code Context` —
+above the user request, so Qwen uses it as ground truth, not as a hint.
+
+### UI surfaces
+
+- `src/components/CodeGraphToolbarButton.tsx` — a floating button anchored
+  bottom-left that opens a panel with stats, a `Scan now` action, search,
+  and parser-source indicator (`tree-sitter` vs `regex-fallback`).
+- `src/components/InstructionGeneratorDialog.tsx` — has a third info strip
+  showing total entity count, kind breakdown, and how many entities match
+  the current node.
+
+### Failure modes
+
+| Symptom | Behaviour |
+|---|---|
+| Grammar WASM 404 at `/grammars/*` | `runParserForFile` catches, falls back to `RegexCodeParser`. UI still works; extracted entities are surfaced, just less precisely. |
+| Browser without FS Access | Scan is unavailable (folder walker needs the API). Dialog hides the scan trigger or surfaces a clear error. |
+| File > 1 MiB | Skipped silently to keep the in-memory graph manageable. |
+| Network fail on first load | IndexedDB cache reused on next visit; clear it via DevTools → Application → IndexedDB. |
+
 

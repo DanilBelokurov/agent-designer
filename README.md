@@ -1,14 +1,16 @@
 # Agent Designer
 
 Visual designer for AI-agent graphs. Drag orchestrators, sub-agents and skills
-onto a canvas, connect them, edit properties, then either export a JSON
-project or generate a Python `dataclass` skeleton.
+onto a canvas, connect them, edit properties, generate Markdown instructions
+via a local Qwen CLI, and let the same project scan the real code you have on
+disk via tree-sitter — all client-side, all from one dev server.
 
 ## Quick start
 
 ```sh
 npm install
-npm run dev        # opens http://localhost:5173 with the designer
+node scripts/fetch-grammars.cjs   # download tree-sitter language WASMs
+npm run dev                       # opens http://localhost:5173
 ```
 
 ## Optional: AI instruction generation
@@ -35,6 +37,29 @@ Environment overrides (all optional):
 When the server is unreachable the dialog surfaces a clear error and the rest
 of the app keeps working.
 
+## Code-graph scan
+
+The bottom-left `Code graph` button opens a floating panel that walks the
+project folder you picked in the instruction dialog, parses each supported
+file, and builds an in-memory graph of classes / functions / methods /
+imports (TypeScript / JavaScript / Python). When you generate an instruction,
+any entities matching the node's label or function name are inserted into the
+prompt as Markdown snippets — the LLM then writes the instruction grounded
+in real signatures and doc comments rather than guessing.
+
+The scan uses `web-tree-sitter` (WASM) when its grammar files are present in
+`public/grammars/`, and falls back to a regex extractor otherwise so the app
+is still useful without `fetch-grammars`.
+
+To refresh or update grammars:
+
+```sh
+node scripts/fetch-grammars.cjs   # downloads runtime + TS/JS/Python grammars
+```
+
+Override pinned releases with env vars (`TREE_SITTER_TYPESCRIPT_VERSION`,
+etc.) — see the script.
+
 ## Saving instructions to disk
 
 Pick a project folder once via the `Pick folder…` button at the top of the
@@ -57,4 +82,4 @@ browser download instead — the path is still recorded on the node.
 ## Where things live
 
 See `AGENTS.md` for the full codebase guide — data model, store API, every
-component, and recipes for common changes.
+component, tree-sitter architecture, and recipes for common changes.

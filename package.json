@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "server": "node server/server.js",
+    "grammars": "node scripts/fetch-grammars.cjs",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview"
@@ -15,6 +16,7 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "reactflow": "^11.11.4",
+    "web-tree-sitter": "^0.26.11",
     "zustand": "^5.0.14"
   },
   "devDependencies": {

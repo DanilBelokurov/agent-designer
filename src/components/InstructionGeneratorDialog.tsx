@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { X, Sparkles, FolderTree, Download, Save, AlertCircle, Loader2 } from 'lucide-react';
+import { X, Sparkles, FolderTree, Download, Save, AlertCircle, Loader2, Code2 } from 'lucide-react';
 import type { Node, Edge } from 'reactflow';
 
 import { useGraphStore } from '../store/useGraphStore';
 import { useFileSystemStore } from '../store/useFileSystemStore';
+import { useCodeGraphStore } from '../store/useCodeGraphStore';
+import { describeGraph } from '../store/useCodeGraphStore';
 import type { AppNode, NodeConfig } from '../types';
 import {
   buildPromptForNode,
@@ -18,6 +20,7 @@ import {
   writeInstructionToDisk,
 } from '../services/fileSystem';
 import { QwenUnavailableError, generateViaQwen } from '../services/qwenClient';
+import { collectContextForNode } from '../services/treeSitter/contextCollector';
 
 interface InstructionGeneratorDialogProps {
   node: Node;
@@ -119,6 +122,15 @@ export default function InstructionGeneratorDialog({
     [edges, node.id, nodes],
   );
 
+  const codeGraph = useCodeGraphStore((s) => s.graph);
+  const codePhase = useCodeGraphStore((s) => s.phase);
+  const codeStats = useMemo(() => describeGraph(codeGraph), [codeGraph]);
+
+  const codeContext = useMemo(() => {
+    if (!userRequest.trim()) return null; // only when user actually wants to generate
+    return collectContextForNode(appNode, codeGraph);
+  }, [appNode, codeGraph, userRequest]);
+
   const onGenerate = async () => {
     if (!userRequest.trim()) {
       setError('Please describe what you want the instruction to cover.');
@@ -127,9 +139,11 @@ export default function InstructionGeneratorDialog({
     setStatus('generating');
     setError(null);
     try {
+      const ctx = codeContext ?? collectContextForNode(appNode, codeGraph);
       const prompt = buildPromptForNode(appNode, userRequest, {
         upstreamSummary: upstream.length ? upstream.join(', ') : undefined,
         downstreamSummary: downstream.length ? downstream.join(', ') : undefined,
+        codeContext: ctx.entityCount > 0 ? ctx.markdown : null,
       });
       const text = await generateViaQwen(prompt);
       if (!text) {
@@ -286,6 +300,40 @@ export default function InstructionGeneratorDialog({
                 {directory ? 'Change…' : 'Pick folder…'}
               </button>
             )}
+          </div>
+
+          {/* Code-graph status */}
+          <div className="flex items-center justify-between p-3 bg-slate-800/40 border border-slate-700/50 rounded-xl">
+            <div className="flex items-center gap-2 text-sm min-w-0">
+              <Code2 className="w-4 h-4 text-slate-400 flex-shrink-0" />
+              <div className="min-w-0">
+                {codeStats.totalEntities > 0 ? (
+                  <>
+                    <div className="text-slate-200">
+                      {codeStats.totalEntities} code entities
+                      {codeContext && codeContext.entityCount > 0 && (
+                        <span className="ml-2 text-[11px] text-emerald-400">
+                          ({codeContext.entityCount} match this node)
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-slate-500 truncate">
+                      {Object.entries(codeStats.byKind)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 4)
+                        .map(([k, n]) => `${n} ${k}`)
+                        .join(' · ')}
+                    </div>
+                  </>
+                ) : codePhase === 'scanning' ? (
+                  <span className="text-slate-400">Scanning project for code…</span>
+                ) : (
+                  <span className="text-slate-400">
+                    Run a code-graph scan from the toolbar to enrich the prompt with real signatures.
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* Request */}

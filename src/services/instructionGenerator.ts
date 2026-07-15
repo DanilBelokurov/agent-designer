@@ -22,6 +22,8 @@ export function relativePathForNode(node: AppNode): string {
 interface BuildPromptOptions {
   upstreamSummary?: string;
   downstreamSummary?: string;
+  /** Markdown produced by `collectContextForNode` — included verbatim under "Project Code Context". */
+  codeContext?: string | null;
 }
 
 export function buildPromptForNode(
@@ -57,6 +59,17 @@ export function buildPromptForNode(
   }
   if (options.downstreamSummary) {
     lines.push('## Downstream (this node attaches to)', options.downstreamSummary, '');
+  }
+
+  if (options.codeContext && options.codeContext.trim()) {
+    lines.push(
+      '## Project Code Context',
+      'Relevant code extracted from the project folder by a tree-sitter scan. ' +
+        'Use these signatures, doc comments, and bodies as the ground truth for naming, parameter shapes, behaviour, and edge cases.',
+      '',
+      options.codeContext.trim(),
+      '',
+    );
   }
 
   lines.push('## User Request', userRequest.trim(), '');

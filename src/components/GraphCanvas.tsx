@@ -1,4 +1,4 @@
-import { useCallback, useRef, useMemo } from 'react';
+import { useCallback, useEffect, useRef, useMemo } from 'react';
 import ReactFlow, {
   Background,
   Controls,
@@ -18,8 +18,10 @@ import { OrchestratorNode, SubAgentNode, SkillNode } from './nodes';
 import NodePalette from './panels/NodePalette';
 import PropertiesPanel from './panels/PropertiesPanel';
 import Toolbar from './Toolbar';
+import CodeGraphToolbarButton from './CodeGraphToolbarButton';
 import type { NodeType } from '../types';
 import { autoLayout } from '../utils/autoLayout';
+import { hydrateCodeGraphStore } from '../store/useCodeGraphStore';
 
 const nodeTypes = {
   orchestrator: OrchestratorNode,
@@ -42,6 +44,10 @@ const GraphCanvas = () => {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const { screenToFlowPosition, fitView } = useReactFlow();
   const { nodes, edges, selectedNodeId, onNodesChange, onEdgesChange, onConnect, addNode, selectNode, setNodesPositions } = useGraphStore();
+
+  useEffect(() => {
+    void hydrateCodeGraphStore();
+  }, []);
 
   const onDragStart = useCallback(
     (event: React.DragEvent, nodeType: NodeType) => {
@@ -216,6 +222,8 @@ const GraphCanvas = () => {
         
         {selectedNodeId !== null && <PropertiesPanel />}
       </div>
+
+      <CodeGraphToolbarButton />
     </div>
   );
 };
