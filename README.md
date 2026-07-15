@@ -1,32 +1,60 @@
-# React + TypeScript + Vite
+# Agent Designer
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Visual designer for AI-agent graphs. Drag orchestrators, sub-agents and skills
+onto a canvas, connect them, edit properties, then either export a JSON
+project or generate a Python `dataclass` skeleton.
 
-Currently, two official plugins are available:
+## Quick start
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```sh
+npm install
+npm run dev        # opens http://localhost:5173 with the designer
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Optional: AI instruction generation
+
+The "Generate instruction with Qwen…" button inside a node's PropertiesPanel
+talks to a local bridge server that shells out to the `qwen` CLI.
+
+In a second terminal:
+
+```sh
+npm run server     # starts the bridge on http://localhost:3001
+```
+
+Environment overrides (all optional):
+
+| variable | default | meaning |
+|---|---|---|
+| `PORT` | `3001` | listen port |
+| `HOST` | `127.0.0.1` | bind host (kept `localhost` only by default) |
+| `QWEN_COMMAND` | `qwen` | binary to invoke (point at any LLM CLI that takes `-p "<prompt>"`) |
+| `QWEN_TIMEOUT_MS` | `120000` | per-request timeout |
+| `CORS_ORIGIN` | `http://localhost:5173` | which dev origin may call the server |
+
+When the server is unreachable the dialog surfaces a clear error and the rest
+of the app keeps working.
+
+## Saving instructions to disk
+
+Pick a project folder once via the `Pick folder…` button at the top of the
+generator dialog. The app uses the [File System Access
+API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_Access_API),
+so on Chrome/Edge/Brave it writes `agents/<slug>/AGENT.md` and
+`skills/<slug>/SKILL.md` directly to disk. Firefox / Safari users get a
+browser download instead — the path is still recorded on the node.
+
+## Scripts
+
+| script | what it does |
+|---|---|
+| `npm run dev` | Vite dev server (port 5173) |
+| `npm run server` | qwen bridge (port 3001, requires Qwen CLI installed) |
+| `npm run build` | TypeScript project build + production bundle |
+| `npm run preview` | serve `dist/` |
+| `npm run lint` | oxlint |
+
+## Where things live
+
+See `AGENTS.md` for the full codebase guide — data model, store API, every
+component, and recipes for common changes.

@@ -1,11 +1,13 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { Node, Edge } from 'reactflow';
 import { useGraphStore } from '../../store/useGraphStore';
 import type { NodeType, OrchestratorConfig, SubAgentConfig, SkillConfig } from '../../types';
-import { Trash2, X, Link2, Settings, ChevronRight } from 'lucide-react';
+import { Trash2, X, Link2, Settings, ChevronRight, Sparkles } from 'lucide-react';
+import InstructionGeneratorDialog from '../InstructionGeneratorDialog';
 
 const PropertiesPanel = () => {
   const { nodes, edges, selectedNodeId, updateNode, deleteNode, selectNode } = useGraphStore();
+  const [generatorOpen, setGeneratorOpen] = useState(false);
 
   const selectedNode = useMemo(
     () => nodes.find((n) => n.id === selectedNodeId),
@@ -136,6 +138,7 @@ const PropertiesPanel = () => {
           <OrchestratorFields
             config={config as OrchestratorConfig}
             onChange={handleConfigChange}
+            onOpenGenerator={() => setGeneratorOpen(true)}
           />
         )}
 
@@ -145,6 +148,7 @@ const PropertiesPanel = () => {
             onChange={handleConfigChange}
             skills={nodes.filter(n => n.type === 'skill')}
             connectedEdges={connectedEdges}
+            onOpenGenerator={() => setGeneratorOpen(true)}
           />
         )}
 
@@ -152,6 +156,7 @@ const PropertiesPanel = () => {
           <SkillFields
             config={config as SkillConfig}
             onChange={handleConfigChange}
+            onOpenGenerator={() => setGeneratorOpen(true)}
           />
         )}
 
@@ -212,6 +217,15 @@ const PropertiesPanel = () => {
           Delete Node
         </button>
       </div>
+
+      {generatorOpen && selectedNode && (
+        <InstructionGeneratorDialog
+          node={selectedNode}
+          nodes={nodes}
+          edges={edges}
+          onClose={() => setGeneratorOpen(false)}
+        />
+      )}
     </div>
   );
 };
@@ -220,7 +234,19 @@ const PropertiesPanel = () => {
 type FieldProps<C = any> = {
   config: C;
   onChange: (key: string, value: unknown) => void;
+  onOpenGenerator: () => void;
 };
+
+const GenerateButton = ({ onClick }: { onClick: () => void }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className="flex items-center gap-1.5 text-[11px] text-indigo-300 hover:text-indigo-200 transition-colors mt-1"
+  >
+    <Sparkles className="w-3 h-3" />
+    Generate instruction with Qwen…
+  </button>
+);
 
 const TextareaField = ({ label, value, onChange, placeholder, rows = 3 }: {
   label: string;
@@ -268,15 +294,18 @@ const NumberField = ({ label, value, onChange, min, max }: {
   </div>
 );
 
-const OrchestratorFields = ({ config, onChange }: FieldProps<OrchestratorConfig>) => (
+const OrchestratorFields = ({ config, onChange, onOpenGenerator }: FieldProps<OrchestratorConfig>) => (
   <div className="space-y-4">
-    <TextareaField
-      label="Instructions"
-      value={(config.instructions as string) || ''}
-      onChange={(v) => onChange('instructions', v)}
-      placeholder="Enter orchestrator instructions..."
-      rows={4}
-    />
+    <div className="space-y-1">
+      <TextareaField
+        label="Instructions"
+        value={(config.instructions as string) || ''}
+        onChange={(v) => onChange('instructions', v)}
+        placeholder="Enter orchestrator instructions..."
+        rows={4}
+      />
+      <GenerateButton onClick={onOpenGenerator} />
+    </div>
     <NumberField
       label="Max Delegations"
       value={(config.maxDelegations as number) || 5}
@@ -292,22 +321,26 @@ interface SubAgentFieldsProps {
   onChange: (key: string, value: unknown) => void;
   skills: Node[];
   connectedEdges: Edge[];
+  onOpenGenerator: () => void;
 }
 
-const SubAgentFields = ({ config, onChange, skills, connectedEdges }: SubAgentFieldsProps) => {
+const SubAgentFields = ({ config, onChange, skills, connectedEdges, onOpenGenerator }: SubAgentFieldsProps) => {
   const attachedSkills = skills.filter((s: Node) =>
     connectedEdges.some((e: Edge) => e.target === s.id && e.source === connectedEdges[0]?.source)
   );
 
   return (
     <div className="space-y-4">
-      <TextareaField
-        label="Instructions"
-        value={(config.instructions as string) || ''}
-        onChange={(v) => onChange('instructions', v)}
-        placeholder="Enter agent instructions..."
-        rows={4}
-      />
+      <div className="space-y-1">
+        <TextareaField
+          label="Instructions"
+          value={(config.instructions as string) || ''}
+          onChange={(v) => onChange('instructions', v)}
+          placeholder="Enter agent instructions..."
+          rows={4}
+        />
+        <GenerateButton onClick={onOpenGenerator} />
+      </div>
       <div className="space-y-2">
         <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider">
           Attached Skills ({attachedSkills.length})
@@ -334,7 +367,7 @@ const SubAgentFields = ({ config, onChange, skills, connectedEdges }: SubAgentFi
   );
 };
 
-const SkillFields = ({ config, onChange }: FieldProps<SkillConfig>) => (
+const SkillFields = ({ config, onChange, onOpenGenerator }: FieldProps<SkillConfig>) => (
   <div className="space-y-4">
     <div className="space-y-2">
       <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider">
@@ -345,18 +378,21 @@ const SkillFields = ({ config, onChange }: FieldProps<SkillConfig>) => (
         value={(config.functionName as string) || ''}
         onChange={(e) => onChange('functionName', e.target.value)}
         placeholder="e.g., get_weather"
-        className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded-xl text-white 
-                   placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 
+        className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded-xl text-white
+                   placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50
                    focus:border-emerald-500/50 transition-all backdrop-blur-sm font-mono"
       />
     </div>
-    <TextareaField
-      label="Description"
-      value={(config.description as string) || ''}
-      onChange={(v) => onChange('description', v)}
-      placeholder="Describe what this skill does..."
-      rows={3}
-    />
+    <div className="space-y-1">
+      <TextareaField
+        label="Description"
+        value={(config.description as string) || ''}
+        onChange={(v) => onChange('description', v)}
+        placeholder="Describe what this skill does..."
+        rows={3}
+      />
+      <GenerateButton onClick={onOpenGenerator} />
+    </div>
     <div className="space-y-2">
       <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider">
         Parameters (JSON)
@@ -372,8 +408,8 @@ const SkillFields = ({ config, onChange }: FieldProps<SkillConfig>) => (
         }}
         rows={4}
         placeholder='{"param1": "type"}'
-        className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded-xl text-white 
-                   placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 
+        className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded-xl text-white
+                   placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50
                    focus:border-emerald-500/50 transition-all resize-none backdrop-blur-sm font-mono text-xs"
       />
     </div>

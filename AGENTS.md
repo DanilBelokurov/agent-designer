@@ -24,9 +24,10 @@ The app is purely client-side; there is no backend.
 | UI runtime | React 19 | strict via `tsconfig.app.json` |
 | Language | TypeScript | `verbatimModuleSyntax: true` — every type-only import must use `import type` |
 | Graph canvas | `reactflow` 11 | custom node types, custom controls, validated connections |
-| State | `zustand` 5 | single store; React Flow's local change events are forwarded into it |
+| State | `zustand` 5 | one graph store + one FS store; React Flow's local change events are forwarded into the graph store |
 | Icons | `lucide-react` 1.x | used in nodes, panels, toolbar, controls |
 | Styling | Tailwind CSS 3 + PostCSS | glassmorphism via `src/index.css` `@layer components` |
+| Bridge server | Node `http` built-in | `server/server.js`, no extra deps; `npm run server` |
 | Lint | `oxlint` (`npm run lint`) | |
 | Entry | `src/main.tsx` → `src/App.tsx` (wraps `<GraphCanvas>` in `<ReactFlowProvider>`) | |
 
@@ -37,7 +38,7 @@ The app is purely client-side; there is no backend.
 ```
 agent-graph-designer/
 ├── index.html                        # Google Fonts (Inter) + root div
-├── package.json                      # scripts: dev, build, lint, preview
+├── package.json                      # scripts: dev, build, lint, preview, server
 ├── vite.config.ts                    # vite + @vitejs/plugin-react
 ├── tsconfig.json / .app / .node      # strict TS, verbatimModuleSyntax
 ├── tailwind.config.js
@@ -46,19 +47,27 @@ agent-graph-designer/
 ├── base-config.json                  # pre-built sample project (213 nodes)
 ├── scripts/
 │   └── generate-base-config.cjs      # Node script that builds base-config.json
+├── server/
+│   └── server.js                     # local bridge: POST /generate → `qwen -p`
 ├── src/
 │   ├── main.tsx                      # ReactDOM.createRoot
 │   ├── App.tsx                       # ReactFlowProvider + GraphCanvas
 │   ├── index.css                     # Tailwind + React Flow overrides + glass styles
 │   ├── types/
-│   │   └── index.ts                  # NodeType, NodeConfig, AppNode, AppEdge, Project
+│   │   └── index.ts                  # NodeType, NodeConfig (incl. instructionFilePath), AppNode, AppEdge, Project
 │   ├── store/
-│   │   └── useGraphStore.ts          # Zustand store (single source of truth)
+│   │   ├── useGraphStore.ts          # graph state (nodes, edges, selection)
+│   │   └── useFileSystemStore.ts     # picked project folder + error state
+│   ├── services/
+│   │   ├── qwenClient.ts             # fetch wrapper around the bridge /generate
+│   │   ├── fileSystem.ts             # FS Access API + download fallback
+│   │   └── instructionGenerator.ts   # prompt assembly + per-node path derivation
 │   ├── utils/
 │   │   └── autoLayout.ts             # hierarchical top-down layout algorithm
 │   └── components/
 │       ├── GraphCanvas.tsx           # top-level layout, hosts ReactFlow
 │       ├── Toolbar.tsx               # top bar (project name, import/export, codegen)
+│       ├── InstructionGeneratorDialog.tsx # modal invoked from PropertiesPanel
 │       ├── nodes/
 │       │   ├── index.ts              # re-exports the three node components
 │       │   ├── OrchestratorNode.tsx  # indigo gradient, target handle top, source bottom
@@ -227,7 +236,8 @@ Returns `Record<nodeId, { x, y }>`. Nodes without a computed position keep their
 4. **Select** — click any node. PropertiesPanel slides in with a themed header and per-type form. Click anywhere empty to deselect → panel hides.
 5. **Auto-layout** — click the `Workflow` icon in the bottom-right Controls. The whole graph is re-positioned into a clean tree and the viewport fits.
 6. **Save / load** — Toolbar's `Export` writes `<projectName>.json`. `Import` reads it back. `Generate Code` writes Python.
-7. **Clear** — Toolbar's `Clear` button (after confirm) wipes nodes and edges.
+7. **Generate instruction** — see section 12.
+8. **Clear** — Toolbar's `Clear` button (after confirm) wipes nodes and edges.
 
 ---
 
@@ -279,6 +289,7 @@ Returns `Record<nodeId, { x, y }>`. Nodes without a computed position keep their
 ```sh
 npm install
 npm run dev        # http://localhost:5173 (vite default)
+npm run server     # local Qwen bridge on http://localhost:3001
 npm run build      # tsc -b + vite build → dist/
 npm run lint       # oxlint
 npm run preview    # serve dist/
@@ -286,3 +297,50 @@ npm run preview    # serve dist/
 # Regenerate base-config.json:
 node scripts/generate-base-config.cjs
 ```
+
+---
+
+## 12. Instruction generator (Qwen integration)
+
+Generate a Markdown instruction for any node using a locally-installed Qwen
+CLI. The browser cannot spawn processes, so a tiny Node bridge is required.
+
+### Components
+
+| Piece | Role |
+|---|---|
+| `server/server.js` | HTTP server on `127.0.0.1:3001`. Endpoints: `POST /generate` (spawns `qwen -p <prompt>`, returns `{ result, error }`), `GET /health` (echoes config). CORS-allowed origin defaults to `http://localhost:5173`. Configurable via env: `PORT`, `HOST`, `QWEN_COMMAND`, `QWEN_TIMEOUT_MS`, `CORS_ORIGIN`. |
+| `src/services/qwenClient.ts` | `generateViaQwen(prompt)` posts to the bridge and throws `QwenUnavailableError` with a friendly message on any failure (network, non-2xx, spawn error, timeout). Also has `checkHealth`. |
+| `src/services/instructionGenerator.ts` | `buildPromptForNode(node, userRequest, ctx)` assembles the prompt (node metadata + upstream/downstream labels + per-type required sections). `relativePathForNode(node)` returns `agents/<slug>/AGENT.md` or `skills/<slug>/SKILL.md`. |
+| `src/services/fileSystem.ts` | `pickProjectDirectory()`, `writeInstructionToDisk(dir, path, text)`, `readInstructionFromDisk(dir, path)`. Plus an in-memory + browser-download fallback for browsers without the FS Access API. |
+| `src/store/useFileSystemStore.ts` | Holds the current `ProjectDirectory` (handle + name) plus `isSupported` (detected at load) and `lastError`. Lives for the session only — directory handles are not serializable. |
+| `src/components/InstructionGeneratorDialog.tsx` | Modal: textarea for the user request → `Generate` calls the bridge → editable preview → `Save` writes the file (or downloads a fallback). Closes on save or via `×`/Escape/backdrop click. |
+| Per-type field in `PropertiesPanel` | A small `Generate instruction with Qwen…` link (Sparkles icon) opens the dialog. Wired through a local `generatorOpen` boolean. |
+
+### Flow
+
+1. User picks a project folder (only on Chromium-class browsers). The handle is kept in `useFileSystemStore`.
+2. User opens a node and clicks `Generate instruction`. The dialog opens with the node's existing instruction text (or the on-disk file content if `instructionFilePath` is set) preloaded.
+3. User types a request. `Generate` POSTs the assembled prompt to `/generate`, which `spawn`s `qwen -p <prompt>` and waits up to `QWEN_TIMEOUT_MS` for stdout.
+4. Result lands in the editable preview. The user can edit freely.
+5. `Save`:
+   - If a project folder is picked → write to disk via `FileSystemAccess`, set `instructionFilePath`, and mirror the text into `node.config.instructions` (or `description` for skills).
+   - Otherwise → trigger a browser download of `<fileName>.md`, remember the path in-memory, and mirror the text into the config field.
+
+### Adding more context later
+
+`buildPromptForNode` already accepts `upstreamSummary` and `downstreamSummary`
+strings. Today those are just the comma-joined labels of connected nodes. To
+plug in tree-sitter code-graph results later, extend
+`services/contextCollector.ts` (new file) to take the same arguments and
+return a richer prompt body — the dialog already passes the right inputs.
+
+### Failure modes and UX
+
+| Symptom | What user sees |
+|---|---|
+| `qwen` not on PATH | Red error in the dialog: "could not spawn qwen: … Is Qwen installed?" Set `QWEN_COMMAND`. |
+| Bridge down | Red error: "Cannot reach qwen bridge at http://localhost:3001 …" |
+| Browser without FS Access | Folder picker hidden; Save button labelled "Save & download"; file is downloaded via the browser. |
+| Folder picked without write permission | Dialog surfaces "You did not grant write access. Re-pick the folder and allow modification." |
+

@@ -3,17 +3,20 @@ export type NodeType = 'orchestrator' | 'sub_agent' | 'skill';
 export interface OrchestratorConfig {
   instructions?: string;
   maxDelegations?: number;
+  instructionFilePath?: string;
 }
 
 export interface SubAgentConfig {
   instructions?: string;
   tools?: string[];
+  instructionFilePath?: string;
 }
 
 export interface SkillConfig {
   functionName: string;
   description: string;
   parameters?: Record<string, unknown>;
+  instructionFilePath?: string;
 }
 
 export type NodeConfig = OrchestratorConfig | SubAgentConfig | SkillConfig;

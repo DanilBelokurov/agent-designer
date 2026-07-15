@@ -13,11 +13,11 @@ const generateEdgeId = (): string => `edge_${edgeIdCounter++}`;
 const getDefaultConfig = (type: NodeType): NodeConfig => {
   switch (type) {
     case 'orchestrator':
-      return { instructions: '', maxDelegations: 5 };
+      return { instructions: '', maxDelegations: 5, instructionFilePath: undefined };
     case 'sub_agent':
-      return { instructions: '', tools: [] };
+      return { instructions: '', tools: [], instructionFilePath: undefined };
     case 'skill':
-      return { functionName: '', description: '', parameters: {} };
+      return { functionName: '', description: '', parameters: {}, instructionFilePath: undefined };
   }
 };
 
