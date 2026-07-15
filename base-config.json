@@ -1,0 +1,4174 @@
+{
+  "id": "base-config-dev-team-2026-07-15",
+  "name": "Базовая команда разработки",
+  "description": "Полная конфигурация графа агентов: 8 оркестраторов, 41 диспатчируемый агент и навыки для каждого. Готова к импорту в Agent Designer.",
+  "createdAt": "2026-07-15T00:00:00.000Z",
+  "updatedAt": "2026-07-15T00:00:00.000Z",
+  "nodes": [
+    {
+      "id": "orch_1",
+      "type": "orchestrator",
+      "label": "Аналитик требований",
+      "config": {
+        "instructions": "Координирует работу по сбору, анализу и формализации требований. Делегирует задачи извлечения, декомпозиции, поиска граничных случаев, формализации и генерации критериев приёмки соответствующим диспатчируемым агентам.",
+        "maxDelegations": 5
+      },
+      "position": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": "agent_1",
+      "type": "sub_agent",
+      "label": "Извлекатель требований",
+      "config": {
+        "instructions": "Извлекает требования из пользовательских историй, технических заданий и постановок. Выделяет функциональные и нефункциональные требования, распознаёт неявные ожидания заказчика, синхронизирует результат с трекерами задач.",
+        "tools": []
+      },
+      "position": {
+        "x": -440,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_1",
+      "type": "skill",
+      "label": "parse_user_stories_and_specs",
+      "config": {
+        "functionName": "parse_user_stories_and_specs",
+        "description": "Парсинг пользовательских историй и ТЗ",
+        "parameters": {}
+      },
+      "position": {
+        "x": -740,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_2",
+      "type": "skill",
+      "label": "extract_functional_and_nonfunctional_requirements",
+      "config": {
+        "functionName": "extract_functional_and_nonfunctional_requirements",
+        "description": "Выделение функциональных/нефункциональных требований",
+        "parameters": {}
+      },
+      "position": {
+        "x": -540,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_3",
+      "type": "skill",
+      "label": "detect_implicit_expectations",
+      "config": {
+        "functionName": "detect_implicit_expectations",
+        "description": "Распознавание неявных ожиданий",
+        "parameters": {}
+      },
+      "position": {
+        "x": -340,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_4",
+      "type": "skill",
+      "label": "sync_with_task_trackers",
+      "config": {
+        "functionName": "sync_with_task_trackers",
+        "description": "Интеграция с трекерами задач",
+        "parameters": {}
+      },
+      "position": {
+        "x": -140,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_2",
+      "type": "sub_agent",
+      "label": "Декомпозитор задач",
+      "config": {
+        "instructions": "Строит иерархию работ (WBS), выявляет зависимости между задачами, оценивает сложность и приоритизирует работу по методикам MoSCoW и RICE, формирует атомарные рабочие единицы.",
+        "tools": []
+      },
+      "position": {
+        "x": -220,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_5",
+      "type": "skill",
+      "label": "build_wbs_tree",
+      "config": {
+        "functionName": "build_wbs_tree",
+        "description": "Построение дерева задач (WBS)",
+        "parameters": {}
+      },
+      "position": {
+        "x": -520,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_6",
+      "type": "skill",
+      "label": "detect_task_dependencies",
+      "config": {
+        "functionName": "detect_task_dependencies",
+        "description": "Выявление зависимостей",
+        "parameters": {}
+      },
+      "position": {
+        "x": -320,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_7",
+      "type": "skill",
+      "label": "estimate_and_prioritize_moscow_rice",
+      "config": {
+        "functionName": "estimate_and_prioritize_moscow_rice",
+        "description": "Оценка сложности и приоритизация (MoSCoW, RICE)",
+        "parameters": {}
+      },
+      "position": {
+        "x": -120,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_8",
+      "type": "skill",
+      "label": "create_atomic_work_units",
+      "config": {
+        "functionName": "create_atomic_work_units",
+        "description": "Формирование атомарных рабочих единиц",
+        "parameters": {}
+      },
+      "position": {
+        "x": 80,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_3",
+      "type": "sub_agent",
+      "label": "Аналитик граничных случаев",
+      "config": {
+        "instructions": "Ищет edge cases на основе модели предметной области, применяет техники граничных значений, генерирует альтернативные и ошибочные сценарии, проверяет полноту требований.",
+        "tools": []
+      },
+      "position": {
+        "x": 0,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_9",
+      "type": "skill",
+      "label": "apply_boundary_value_analysis",
+      "config": {
+        "functionName": "apply_boundary_value_analysis",
+        "description": "Техники граничных значений",
+        "parameters": {}
+      },
+      "position": {
+        "x": -300,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_10",
+      "type": "skill",
+      "label": "analyze_edge_cases_from_domain",
+      "config": {
+        "functionName": "analyze_edge_cases_from_domain",
+        "description": "Анализ edge cases на основе модели предметной области",
+        "parameters": {}
+      },
+      "position": {
+        "x": -100,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_11",
+      "type": "skill",
+      "label": "generate_alternative_and_error_scenarios",
+      "config": {
+        "functionName": "generate_alternative_and_error_scenarios",
+        "description": "Генерация альтернативных и ошибочных сценариев",
+        "parameters": {}
+      },
+      "position": {
+        "x": 100,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_12",
+      "type": "skill",
+      "label": "verify_requirements_completeness",
+      "config": {
+        "functionName": "verify_requirements_completeness",
+        "description": "Проверка полноты требований",
+        "parameters": {}
+      },
+      "position": {
+        "x": 300,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_4",
+      "type": "sub_agent",
+      "label": "Формализатор спецификаций",
+      "config": {
+        "instructions": "Переводит неформальные требования в структурированный формат: use case, user story mapping, ubiquitous language. Фиксирует критерии готовности (Definition of Ready).",
+        "tools": []
+      },
+      "position": {
+        "x": 220,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_13",
+      "type": "skill",
+      "label": "translate_to_structured_format",
+      "config": {
+        "functionName": "translate_to_structured_format",
+        "description": "Перевод в структурированный формат",
+        "parameters": {}
+      },
+      "position": {
+        "x": -80,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_14",
+      "type": "skill",
+      "label": "apply_use_case_and_user_story_mapping",
+      "config": {
+        "functionName": "apply_use_case_and_user_story_mapping",
+        "description": "Нотации use case/user story mapping",
+        "parameters": {}
+      },
+      "position": {
+        "x": 120,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_15",
+      "type": "skill",
+      "label": "create_ubiquitous_language",
+      "config": {
+        "functionName": "create_ubiquitous_language",
+        "description": "Создание Ubiquitous Language",
+        "parameters": {}
+      },
+      "position": {
+        "x": 320,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_16",
+      "type": "skill",
+      "label": "fix_definition_of_ready",
+      "config": {
+        "functionName": "fix_definition_of_ready",
+        "description": "Фиксация критериев готовности (DoR)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 520,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_5",
+      "type": "sub_agent",
+      "label": "Генератор критериев приёмки",
+      "config": {
+        "instructions": "Формулирует acceptance criteria в формате Given/When/Then (Gherkin), привязывает их к историям, обеспечивает измеримость и тестируемость, синхронизируется с инженером по тестированию.",
+        "tools": []
+      },
+      "position": {
+        "x": 440,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_17",
+      "type": "skill",
+      "label": "write_gherkin_scenarios",
+      "config": {
+        "functionName": "write_gherkin_scenarios",
+        "description": "Запись Given/When/Then (Gherkin)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 140,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_18",
+      "type": "skill",
+      "label": "link_acceptance_criteria_to_stories",
+      "config": {
+        "functionName": "link_acceptance_criteria_to_stories",
+        "description": "Привязка acceptance criteria к историям",
+        "parameters": {}
+      },
+      "position": {
+        "x": 340,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_19",
+      "type": "skill",
+      "label": "ensure_measurability_and_testability",
+      "config": {
+        "functionName": "ensure_measurability_and_testability",
+        "description": "Обеспечение измеримости и тестируемости",
+        "parameters": {}
+      },
+      "position": {
+        "x": 540,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_20",
+      "type": "skill",
+      "label": "sync_with_test_engineer",
+      "config": {
+        "functionName": "sync_with_test_engineer",
+        "description": "Синхронизация с инженером по тестированию",
+        "parameters": {}
+      },
+      "position": {
+        "x": 740,
+        "y": 640
+      }
+    },
+    {
+      "id": "orch_2",
+      "type": "orchestrator",
+      "label": "Архитектор",
+      "config": {
+        "instructions": "Отвечает за техническую архитектуру решения. Делегирует задачи проектирования высокоуровневой структуры, выбора паттернов, дизайна контрактов, оценки влияния на кодовую базу и проработки кросс-функциональных требований.",
+        "maxDelegations": 5
+      },
+      "position": {
+        "x": 520,
+        "y": 0
+      }
+    },
+    {
+      "id": "agent_6",
+      "type": "sub_agent",
+      "label": "Проектировщик высокоуровневой структуры",
+      "config": {
+        "instructions": "Декомпозирует систему на модули и сервисы, определяет границы контекстов в духе DDD, строит диаграммы компонентов и развёртывания, анализирует атрибуты качества.",
+        "tools": []
+      },
+      "position": {
+        "x": 80,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_21",
+      "type": "skill",
+      "label": "decompose_into_modules_and_services",
+      "config": {
+        "functionName": "decompose_into_modules_and_services",
+        "description": "Декомпозиция на модули/сервисы",
+        "parameters": {}
+      },
+      "position": {
+        "x": -220,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_22",
+      "type": "skill",
+      "label": "define_bounded_contexts_ddd",
+      "config": {
+        "functionName": "define_bounded_contexts_ddd",
+        "description": "Определение границ контекстов (DDD)",
+        "parameters": {}
+      },
+      "position": {
+        "x": -20,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_23",
+      "type": "skill",
+      "label": "build_component_and_deployment_diagrams",
+      "config": {
+        "functionName": "build_component_and_deployment_diagrams",
+        "description": "Построение диаграмм компонентов и развёртывания",
+        "parameters": {}
+      },
+      "position": {
+        "x": 180,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_24",
+      "type": "skill",
+      "label": "analyze_quality_attributes",
+      "config": {
+        "functionName": "analyze_quality_attributes",
+        "description": "Анализ атрибутов качества",
+        "parameters": {}
+      },
+      "position": {
+        "x": 380,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_7",
+      "type": "sub_agent",
+      "label": "Селектор архитектурных паттернов",
+      "config": {
+        "instructions": "Сопоставляет требования с каталогом паттернов (MVC, микросервисы, CQRS, Event Sourcing, Hexagonal Architecture), оценивает плюсы и минусы, документирует решения в формате ADR.",
+        "tools": []
+      },
+      "position": {
+        "x": 300,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_25",
+      "type": "skill",
+      "label": "browse_pattern_catalog",
+      "config": {
+        "functionName": "browse_pattern_catalog",
+        "description": "Каталог паттернов (MVC, микросервисы, CQRS, Event Sourcing, Hexagonal Architecture)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 0,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_26",
+      "type": "skill",
+      "label": "match_patterns_to_requirements",
+      "config": {
+        "functionName": "match_patterns_to_requirements",
+        "description": "Сопоставление с требованиями",
+        "parameters": {}
+      },
+      "position": {
+        "x": 200,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_27",
+      "type": "skill",
+      "label": "evaluate_pros_and_cons",
+      "config": {
+        "functionName": "evaluate_pros_and_cons",
+        "description": "Оценка плюсов/минусов",
+        "parameters": {}
+      },
+      "position": {
+        "x": 400,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_28",
+      "type": "skill",
+      "label": "document_decisions_in_adr",
+      "config": {
+        "functionName": "document_decisions_in_adr",
+        "description": "Документирование в ADR",
+        "parameters": {}
+      },
+      "position": {
+        "x": 600,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_8",
+      "type": "sub_agent",
+      "label": "Дизайнер контрактов",
+      "config": {
+        "instructions": "Проектирует REST/GraphQL/gRPC API, нормализует/денормализует модели данных, определяет схему БД (таблицы, связи, индексы), планирует версионирование API.",
+        "tools": []
+      },
+      "position": {
+        "x": 520,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_29",
+      "type": "skill",
+      "label": "design_rest_graphql_grpc_api",
+      "config": {
+        "functionName": "design_rest_graphql_grpc_api",
+        "description": "Проектирование REST/GraphQL/gRPC",
+        "parameters": {}
+      },
+      "position": {
+        "x": 220,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_30",
+      "type": "skill",
+      "label": "normalize_and_denormalize_data_models",
+      "config": {
+        "functionName": "normalize_and_denormalize_data_models",
+        "description": "Нормализация/денормализация моделей",
+        "parameters": {}
+      },
+      "position": {
+        "x": 420,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_31",
+      "type": "skill",
+      "label": "define_db_schema_indexes",
+      "config": {
+        "functionName": "define_db_schema_indexes",
+        "description": "Определение схемы БД (таблицы, связи, индексы)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 620,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_32",
+      "type": "skill",
+      "label": "version_api_contracts",
+      "config": {
+        "functionName": "version_api_contracts",
+        "description": "Версионирование API",
+        "parameters": {}
+      },
+      "position": {
+        "x": 820,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_9",
+      "type": "sub_agent",
+      "label": "Оценщик влияния на кодовую базу",
+      "config": {
+        "instructions": "Анализирует связность модулей, выявляет «горячие точки», прогнозирует объём изменений и рекомендует подходы, минимизирующие побочные эффекты.",
+        "tools": []
+      },
+      "position": {
+        "x": 740,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_33",
+      "type": "skill",
+      "label": "analyze_module_coupling",
+      "config": {
+        "functionName": "analyze_module_coupling",
+        "description": "Анализ связности модулей",
+        "parameters": {}
+      },
+      "position": {
+        "x": 440,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_34",
+      "type": "skill",
+      "label": "detect_hot_spots",
+      "config": {
+        "functionName": "detect_hot_spots",
+        "description": "Определение «горячих точек»",
+        "parameters": {}
+      },
+      "position": {
+        "x": 640,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_35",
+      "type": "skill",
+      "label": "forecast_change_volume",
+      "config": {
+        "functionName": "forecast_change_volume",
+        "description": "Прогнозирование объёма изменений",
+        "parameters": {}
+      },
+      "position": {
+        "x": 840,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_36",
+      "type": "skill",
+      "label": "minimize_side_effects",
+      "config": {
+        "functionName": "minimize_side_effects",
+        "description": "Рекомендации по минимизации побочных эффектов",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1040,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_10",
+      "type": "sub_agent",
+      "label": "Проработчик кросс-функциональных требований",
+      "config": {
+        "instructions": "Анализирует требования безопасности, производительности, надёжности и наблюдаемости, транслирует их в архитектурные решения, выбирает подходы к кэшированию, балансировке и шардированию.",
+        "tools": []
+      },
+      "position": {
+        "x": 960,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_37",
+      "type": "skill",
+      "label": "analyze_security_performance_reliability_observability",
+      "config": {
+        "functionName": "analyze_security_performance_reliability_observability",
+        "description": "Анализ безопасности, производительности, надёжности, наблюдаемости",
+        "parameters": {}
+      },
+      "position": {
+        "x": 660,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_38",
+      "type": "skill",
+      "label": "translate_into_architectural_decisions",
+      "config": {
+        "functionName": "translate_into_architectural_decisions",
+        "description": "Трансляция в архитектурные решения",
+        "parameters": {}
+      },
+      "position": {
+        "x": 860,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_39",
+      "type": "skill",
+      "label": "choose_caching_strategy",
+      "config": {
+        "functionName": "choose_caching_strategy",
+        "description": "Выбор подходов к кэшированию",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1060,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_40",
+      "type": "skill",
+      "label": "choose_balancing_and_sharding",
+      "config": {
+        "functionName": "choose_balancing_and_sharding",
+        "description": "Балансировка и шардирование",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1260,
+        "y": 640
+      }
+    },
+    {
+      "id": "orch_3",
+      "type": "orchestrator",
+      "label": "Разработчик",
+      "config": {
+        "instructions": "Реализует кодовую базу. Делегирует задачи генерации чистого кода, реализации бизнес-логики, инспекции принципов проектирования, интеграции с внешними интерфейсами и документирования кода.",
+        "maxDelegations": 5
+      },
+      "position": {
+        "x": 1040,
+        "y": 0
+      }
+    },
+    {
+      "id": "agent_11",
+      "type": "sub_agent",
+      "label": "Генератор чистого кода",
+      "config": {
+        "instructions": "Пишет идиоматичный код для выбранного языка и фреймворка, автоматически форматирует, даёт осмысленные имена, минимизирует сложность.",
+        "tools": []
+      },
+      "position": {
+        "x": 600,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_41",
+      "type": "skill",
+      "label": "write_idiomatic_code",
+      "config": {
+        "functionName": "write_idiomatic_code",
+        "description": "Идиоматичное использование языка/фреймворка",
+        "parameters": {}
+      },
+      "position": {
+        "x": 300,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_42",
+      "type": "skill",
+      "label": "auto_format_code",
+      "config": {
+        "functionName": "auto_format_code",
+        "description": "Автоматическое форматирование",
+        "parameters": {}
+      },
+      "position": {
+        "x": 500,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_43",
+      "type": "skill",
+      "label": "name_meaningfully",
+      "config": {
+        "functionName": "name_meaningfully",
+        "description": "Осмысленное именование",
+        "parameters": {}
+      },
+      "position": {
+        "x": 700,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_44",
+      "type": "skill",
+      "label": "minimize_complexity",
+      "config": {
+        "functionName": "minimize_complexity",
+        "description": "Минимизация сложности",
+        "parameters": {}
+      },
+      "position": {
+        "x": 900,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_12",
+      "type": "sub_agent",
+      "label": "Реализатор бизнес-логики",
+      "config": {
+        "instructions": "Транслирует спецификации в код, обрабатывает ошибки и реализует восстановление, реализует бизнес-правила как чистые функции и сервисы, отделяет логику от инфраструктуры.",
+        "tools": []
+      },
+      "position": {
+        "x": 820,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_45",
+      "type": "skill",
+      "label": "translate_specs_to_code",
+      "config": {
+        "functionName": "translate_specs_to_code",
+        "description": "Трансляция спецификаций в код",
+        "parameters": {}
+      },
+      "position": {
+        "x": 520,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_46",
+      "type": "skill",
+      "label": "handle_errors_and_recovery",
+      "config": {
+        "functionName": "handle_errors_and_recovery",
+        "description": "Обработка ошибок и восстановление",
+        "parameters": {}
+      },
+      "position": {
+        "x": 720,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_47",
+      "type": "skill",
+      "label": "implement_business_rules_as_pure_functions",
+      "config": {
+        "functionName": "implement_business_rules_as_pure_functions",
+        "description": "Реализация бизнес-правил как чистых функций/сервисов",
+        "parameters": {}
+      },
+      "position": {
+        "x": 920,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_48",
+      "type": "skill",
+      "label": "separate_logic_from_infrastructure",
+      "config": {
+        "functionName": "separate_logic_from_infrastructure",
+        "description": "Разделение логики и инфраструктуры",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1120,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_13",
+      "type": "sub_agent",
+      "label": "Инспектор принципов",
+      "config": {
+        "instructions": "Проверяет код на соответствие принципам SOLID/KISS/DRY, выявляет нарушения DRY и предлагает абстракции, упрощает переусложнённый код, обеспечивает инверсию зависимостей.",
+        "tools": []
+      },
+      "position": {
+        "x": 1040,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_49",
+      "type": "skill",
+      "label": "check_solid_kiss_dry_principles",
+      "config": {
+        "functionName": "check_solid_kiss_dry_principles",
+        "description": "Проверка соответствия принципам проектирования",
+        "parameters": {}
+      },
+      "position": {
+        "x": 740,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_50",
+      "type": "skill",
+      "label": "detect_dry_violations_and_suggest_abstractions",
+      "config": {
+        "functionName": "detect_dry_violations_and_suggest_abstractions",
+        "description": "Выявление нарушений DRY и предложение абстракций",
+        "parameters": {}
+      },
+      "position": {
+        "x": 940,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_51",
+      "type": "skill",
+      "label": "simplify_overengineered_code",
+      "config": {
+        "functionName": "simplify_overengineered_code",
+        "description": "Упрощение переусложнённого кода",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1140,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_52",
+      "type": "skill",
+      "label": "ensure_dependency_inversion",
+      "config": {
+        "functionName": "ensure_dependency_inversion",
+        "description": "Обеспечение инверсии зависимостей",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1340,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_14",
+      "type": "sub_agent",
+      "label": "Интегратор внешних интерфейсов",
+      "config": {
+        "instructions": "Подключает приложение к БД, брокерам сообщений и внешним API, работает с ORM/ODM/DBAL, реализует репозитории, клиенты и адаптеры, обрабатывает сетевые ошибки, таймауты и повторные попытки.",
+        "tools": []
+      },
+      "position": {
+        "x": 1260,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_53",
+      "type": "skill",
+      "label": "connect_to_db_message_brokers_apis",
+      "config": {
+        "functionName": "connect_to_db_message_brokers_apis",
+        "description": "Подключение к БД, брокерам сообщений, внешним API",
+        "parameters": {}
+      },
+      "position": {
+        "x": 960,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_54",
+      "type": "skill",
+      "label": "work_with_orm_odm_dbal",
+      "config": {
+        "functionName": "work_with_orm_odm_dbal",
+        "description": "Работа с ORM/ODM/DBAL",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1160,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_55",
+      "type": "skill",
+      "label": "implement_repositories_clients_adapters",
+      "config": {
+        "functionName": "implement_repositories_clients_adapters",
+        "description": "Реализация репозиториев, клиентов, адаптеров",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1360,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_56",
+      "type": "skill",
+      "label": "handle_network_timeouts_and_retries",
+      "config": {
+        "functionName": "handle_network_timeouts_and_retries",
+        "description": "Обработка сетевых ошибок, таймаутов, повторных попыток",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1560,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_15",
+      "type": "sub_agent",
+      "label": "Документатор кода",
+      "config": {
+        "instructions": "Пишет комментарии и JavaDoc/JSDoc, добавляет примеры в документацию, документирует сложные алгоритмы inline, поддерживает актуальность документации вместе с кодом.",
+        "tools": []
+      },
+      "position": {
+        "x": 1480,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_57",
+      "type": "skill",
+      "label": "write_comments_and_javadoc_jsdoc",
+      "config": {
+        "functionName": "write_comments_and_javadoc_jsdoc",
+        "description": "Написание комментариев и JavaDoc/JSDoc",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1180,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_58",
+      "type": "skill",
+      "label": "add_documentation_examples",
+      "config": {
+        "functionName": "add_documentation_examples",
+        "description": "Добавление примеров в документацию",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1380,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_59",
+      "type": "skill",
+      "label": "inline_document_complex_algorithms",
+      "config": {
+        "functionName": "inline_document_complex_algorithms",
+        "description": "Inline-документирование сложных алгоритмов",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1580,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_60",
+      "type": "skill",
+      "label": "keep_docs_in_sync_with_code",
+      "config": {
+        "functionName": "keep_docs_in_sync_with_code",
+        "description": "Поддержание актуальности",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1780,
+        "y": 640
+      }
+    },
+    {
+      "id": "orch_4",
+      "type": "orchestrator",
+      "label": "Инженер по тестированию",
+      "config": {
+        "instructions": "Обеспечивает качество продукта через тестирование. Делегирует задачи разработки модульных, интеграционных и e2e-тестов, генерации тестовых данных, валидации граничных условий и анализа покрытия.",
+        "maxDelegations": 5
+      },
+      "position": {
+        "x": 1560,
+        "y": 0
+      }
+    },
+    {
+      "id": "agent_16",
+      "type": "sub_agent",
+      "label": "Разработчик модульных тестов",
+      "config": {
+        "instructions": "Пишет изолированные юнит-тесты (Jest, pytest, JUnit), покрывает все пути выполнения, использует параметризованные тесты, проверяет утверждения и обработку ошибок.",
+        "tools": []
+      },
+      "position": {
+        "x": 1010,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_61",
+      "type": "skill",
+      "label": "write_isolated_unit_tests",
+      "config": {
+        "functionName": "write_isolated_unit_tests",
+        "description": "Написание изолированных юнит-тестов (Jest, pytest, JUnit)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 710,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_62",
+      "type": "skill",
+      "label": "cover_all_execution_paths",
+      "config": {
+        "functionName": "cover_all_execution_paths",
+        "description": "Покрытие всех путей выполнения",
+        "parameters": {}
+      },
+      "position": {
+        "x": 910,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_63",
+      "type": "skill",
+      "label": "write_parameterized_tests",
+      "config": {
+        "functionName": "write_parameterized_tests",
+        "description": "Параметризованные тесты",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1110,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_64",
+      "type": "skill",
+      "label": "assert_and_handle_errors_in_tests",
+      "config": {
+        "functionName": "assert_and_handle_errors_in_tests",
+        "description": "Проверка утверждений и обработки ошибок",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1310,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_17",
+      "type": "sub_agent",
+      "label": "Разработчик интеграционных тестов",
+      "config": {
+        "instructions": "Тестирует взаимодействие модулей и сервисов, настраивает тестовые окружения через контейнеры и WireMock, прогоняет сквозные сценарии с реальными зависимостями и обеспечивает очистку состояния.",
+        "tools": []
+      },
+      "position": {
+        "x": 1230,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_65",
+      "type": "skill",
+      "label": "test_module_interactions",
+      "config": {
+        "functionName": "test_module_interactions",
+        "description": "Тестирование взаимодействия модулей и сервисов",
+        "parameters": {}
+      },
+      "position": {
+        "x": 930,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_66",
+      "type": "skill",
+      "label": "provision_test_environments_containers_wiremock",
+      "config": {
+        "functionName": "provision_test_environments_containers_wiremock",
+        "description": "Настройка тестовых окружений (контейнеры, WireMock)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1130,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_67",
+      "type": "skill",
+      "label": "run_end_to_end_scenarios_with_real_deps",
+      "config": {
+        "functionName": "run_end_to_end_scenarios_with_real_deps",
+        "description": "Сквозные сценарии с реальными зависимостями",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1330,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_68",
+      "type": "skill",
+      "label": "clean_up_state_between_tests",
+      "config": {
+        "functionName": "clean_up_state_between_tests",
+        "description": "Очистка состояния",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1530,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_18",
+      "type": "sub_agent",
+      "label": "Разработчик e2e-тестов",
+      "config": {
+        "instructions": "Описывает сценарии пользовательского поведения в Cypress/Playwright, прогоняет полный пайплайн от фронтенда до хранилища, применяет паттерны Page Object и Screenplay, интегрируется с CI.",
+        "tools": []
+      },
+      "position": {
+        "x": 1450,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_69",
+      "type": "skill",
+      "label": "write_user_behavior_scenarios",
+      "config": {
+        "functionName": "write_user_behavior_scenarios",
+        "description": "Сценарии пользовательского поведения (Cypress, Playwright)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1150,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_70",
+      "type": "skill",
+      "label": "run_frontend_to_storage_pipeline",
+      "config": {
+        "functionName": "run_frontend_to_storage_pipeline",
+        "description": "Полный пайплайн от фронтенда до хранилища",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1350,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_71",
+      "type": "skill",
+      "label": "apply_page_object_and_screenplay",
+      "config": {
+        "functionName": "apply_page_object_and_screenplay",
+        "description": "Паттерны Page Object, Screenplay",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1550,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_72",
+      "type": "skill",
+      "label": "integrate_e2e_with_ci",
+      "config": {
+        "functionName": "integrate_e2e_with_ci",
+        "description": "Интеграция с CI",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1750,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_19",
+      "type": "sub_agent",
+      "label": "Генератор тестовых данных и моков",
+      "config": {
+        "instructions": "Создаёт фабрики тестовых объектов (Factory Boy, faker), генерирует реалистичные случайные данные, мокирует внешние сервисы (MSW, mockito), собирает наборы данных для граничных случаев.",
+        "tools": []
+      },
+      "position": {
+        "x": 1670,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_73",
+      "type": "skill",
+      "label": "build_test_object_factories",
+      "config": {
+        "functionName": "build_test_object_factories",
+        "description": "Фабрики тестовых объектов (Factory Boy, faker)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1370,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_74",
+      "type": "skill",
+      "label": "generate_realistic_random_data",
+      "config": {
+        "functionName": "generate_realistic_random_data",
+        "description": "Генерация реалистичных случайных данных",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1570,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_75",
+      "type": "skill",
+      "label": "mock_external_services",
+      "config": {
+        "functionName": "mock_external_services",
+        "description": "Мокирование внешних сервисов (MSW, mockito)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1770,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_76",
+      "type": "skill",
+      "label": "build_edge_case_datasets",
+      "config": {
+        "functionName": "build_edge_case_datasets",
+        "description": "Наборы данных для граничных случаев",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1970,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_20",
+      "type": "sub_agent",
+      "label": "Валидатор граничных условий",
+      "config": {
+        "instructions": "Тестирует крайние значения, пустые и нулевые входы, воспроизводит ошибочные состояния, проверяет инварианты и постусловия, проводит базовое нагрузочное тестирование.",
+        "tools": []
+      },
+      "position": {
+        "x": 1890,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_77",
+      "type": "skill",
+      "label": "test_boundary_and_null_inputs",
+      "config": {
+        "functionName": "test_boundary_and_null_inputs",
+        "description": "Тестирование крайних значений, пустых/нулевых входов",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1590,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_78",
+      "type": "skill",
+      "label": "reproduce_error_states",
+      "config": {
+        "functionName": "reproduce_error_states",
+        "description": "Воспроизведение ошибочных состояний",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1790,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_79",
+      "type": "skill",
+      "label": "verify_invariants_and_postconditions",
+      "config": {
+        "functionName": "verify_invariants_and_postconditions",
+        "description": "Проверка инвариантов и постусловий",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1990,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_80",
+      "type": "skill",
+      "label": "run_baseline_load_tests",
+      "config": {
+        "functionName": "run_baseline_load_tests",
+        "description": "Базовое нагрузочное тестирование",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2190,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_21",
+      "type": "sub_agent",
+      "label": "Анализатор покрытия",
+      "config": {
+        "instructions": "Измеряет покрытие кода (Istanbul, Coverage.py), выявляет непокрытые ветки, формирует отчёт с рекомендациями и проверяет качество самих тестов.",
+        "tools": []
+      },
+      "position": {
+        "x": 2110,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_81",
+      "type": "skill",
+      "label": "measure_code_coverage",
+      "config": {
+        "functionName": "measure_code_coverage",
+        "description": "Измерение покрытия кода (Istanbul, Coverage.py)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1810,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_82",
+      "type": "skill",
+      "label": "detect_uncovered_branches",
+      "config": {
+        "functionName": "detect_uncovered_branches",
+        "description": "Выявление непокрытых веток",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2010,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_83",
+      "type": "skill",
+      "label": "report_coverage_with_recommendations",
+      "config": {
+        "functionName": "report_coverage_with_recommendations",
+        "description": "Отчёт и рекомендации",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2210,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_84",
+      "type": "skill",
+      "label": "assess_test_quality",
+      "config": {
+        "functionName": "assess_test_quality",
+        "description": "Проверка качества тестов",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2410,
+        "y": 640
+      }
+    },
+    {
+      "id": "orch_5",
+      "type": "orchestrator",
+      "label": "Код-ревьюер",
+      "config": {
+        "instructions": "Проверяет качество изменений в кодовой базе. Делегирует задачи валидации лучших практик, обнаружения логических ошибок, оценки читаемости, советов по рефакторингу и трассировки требований.",
+        "maxDelegations": 5
+      },
+      "position": {
+        "x": 2080,
+        "y": 0
+      }
+    },
+    {
+      "id": "agent_22",
+      "type": "sub_agent",
+      "label": "Валидатор лучших практик",
+      "config": {
+        "instructions": "Проверяет соответствие отраслевым стандартам для конкретного языка и фреймворка, контролирует код-стайл и соглашения, выявляет антипаттерны (God Object, Spaghetti Code) и предлагает улучшения.",
+        "tools": []
+      },
+      "position": {
+        "x": 1640,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_85",
+      "type": "skill",
+      "label": "apply_industry_standards",
+      "config": {
+        "functionName": "apply_industry_standards",
+        "description": "Знание отраслевых стандартов для языка/фреймворка",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1340,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_86",
+      "type": "skill",
+      "label": "check_code_style_and_conventions",
+      "config": {
+        "functionName": "check_code_style_and_conventions",
+        "description": "Проверка код-стайла и соглашений",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1540,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_87",
+      "type": "skill",
+      "label": "detect_antipatterns",
+      "config": {
+        "functionName": "detect_antipatterns",
+        "description": "Выявление антипаттернов (God Object, Spaghetti Code)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1740,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_88",
+      "type": "skill",
+      "label": "suggest_code_improvements",
+      "config": {
+        "functionName": "suggest_code_improvements",
+        "description": "Предложение улучшений",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1940,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_23",
+      "type": "sub_agent",
+      "label": "Детектор логических ошибок и узких мест",
+      "config": {
+        "instructions": "Анализирует алгоритмы на корректность, ищет классические баги (off-by-one, race conditions), оценивает сложность по Big O, проверяет работу с памятью и ресурсами.",
+        "tools": []
+      },
+      "position": {
+        "x": 1860,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_89",
+      "type": "skill",
+      "label": "verify_algorithm_correctness",
+      "config": {
+        "functionName": "verify_algorithm_correctness",
+        "description": "Анализ алгоритмов на корректность",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1560,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_90",
+      "type": "skill",
+      "label": "detect_classic_bugs",
+      "config": {
+        "functionName": "detect_classic_bugs",
+        "description": "Обнаружение багов (off-by-one, race conditions)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1760,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_91",
+      "type": "skill",
+      "label": "profile_big_o_complexity",
+      "config": {
+        "functionName": "profile_big_o_complexity",
+        "description": "Профилирование по Big O",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1960,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_92",
+      "type": "skill",
+      "label": "audit_memory_and_resources",
+      "config": {
+        "functionName": "audit_memory_and_resources",
+        "description": "Проверка работы с памятью/ресурсами",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2160,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_24",
+      "type": "sub_agent",
+      "label": "Оценщик читаемости и сопровождаемости",
+      "config": {
+        "instructions": "Оценивает ясность имён и размеры функций, проверяет комментарии «почему» (а не «что»), анализирует связность и зацепление, прогнозирует простоту будущих изменений.",
+        "tools": []
+      },
+      "position": {
+        "x": 2080,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_93",
+      "type": "skill",
+      "label": "assess_names_and_function_sizes",
+      "config": {
+        "functionName": "assess_names_and_function_sizes",
+        "description": "Оценка ясности имён, размеров функций",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1780,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_94",
+      "type": "skill",
+      "label": "review_why_not_what_comments",
+      "config": {
+        "functionName": "review_why_not_what_comments",
+        "description": "Проверка комментариев «почему», а не «что»",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1980,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_95",
+      "type": "skill",
+      "label": "analyze_cohesion_and_coupling",
+      "config": {
+        "functionName": "analyze_cohesion_and_coupling",
+        "description": "Анализ связности и зацепления",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2180,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_96",
+      "type": "skill",
+      "label": "forecast_change_ease",
+      "config": {
+        "functionName": "forecast_change_ease",
+        "description": "Прогноз простоты изменений",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2380,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_25",
+      "type": "sub_agent",
+      "label": "Советник по рефакторингу",
+      "config": {
+        "instructions": "Применяет конкретные техники рефакторинга (Extract Method, Introduce Parameter Object), безопасно переписывает код с сохранением поведения, использует автоматизированные рефакторинги и приоритизирует работу по кодовым запахам.",
+        "tools": []
+      },
+      "position": {
+        "x": 2300,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_97",
+      "type": "skill",
+      "label": "apply_refactoring_techniques",
+      "config": {
+        "functionName": "apply_refactoring_techniques",
+        "description": "Конкретные техники рефакторинга (Extract Method, Introduce Parameter Object)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2000,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_98",
+      "type": "skill",
+      "label": "preserve_behavior_during_refactor",
+      "config": {
+        "functionName": "preserve_behavior_during_refactor",
+        "description": "Безопасное переписывание с сохранением поведения",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2200,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_99",
+      "type": "skill",
+      "label": "use_automated_refactors",
+      "config": {
+        "functionName": "use_automated_refactors",
+        "description": "Автоматизированные рефакторинги",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2400,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_100",
+      "type": "skill",
+      "label": "prioritize_by_code_smells",
+      "config": {
+        "functionName": "prioritize_by_code_smells",
+        "description": "Приоритизация на основе кодовых запахов",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2600,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_26",
+      "type": "sub_agent",
+      "label": "Трейсер требований",
+      "config": {
+        "instructions": "Сопоставляет код с требованиями и issue, проверяет полноту реализации acceptance criteria, поддерживает traceability matrix (код → требование → тест), выявляет лишнюю функциональность.",
+        "tools": []
+      },
+      "position": {
+        "x": 2520,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_101",
+      "type": "skill",
+      "label": "map_code_to_requirements",
+      "config": {
+        "functionName": "map_code_to_requirements",
+        "description": "Сопоставление кода с требованиями/issue",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2220,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_102",
+      "type": "skill",
+      "label": "verify_acceptance_criteria_coverage",
+      "config": {
+        "functionName": "verify_acceptance_criteria_coverage",
+        "description": "Проверка полноты реализации acceptance criteria",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2420,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_103",
+      "type": "skill",
+      "label": "maintain_traceability_matrix",
+      "config": {
+        "functionName": "maintain_traceability_matrix",
+        "description": "Traceability matrix (код → требование → тест)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2620,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_104",
+      "type": "skill",
+      "label": "detect_unneeded_functionality",
+      "config": {
+        "functionName": "detect_unneeded_functionality",
+        "description": "Выявление лишней функциональности",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2820,
+        "y": 640
+      }
+    },
+    {
+      "id": "orch_6",
+      "type": "orchestrator",
+      "label": "DevOps-инженер",
+      "config": {
+        "instructions": "Обеспечивает поставку и эксплуатацию системы. Делегирует задачи инженерии CI/CD, контейнеризации, управления окружениями и секретами, инфраструктуры как кода, настройки мониторинга и health-чеков.",
+        "maxDelegations": 5
+      },
+      "position": {
+        "x": 2600,
+        "y": 0
+      }
+    },
+    {
+      "id": "agent_27",
+      "type": "sub_agent",
+      "label": "Инженер CI/CD-пайплайнов",
+      "config": {
+        "instructions": "Конфигурирует GitHub Actions, GitLab CI и Jenkins, выстраивает параллельные стадии, кэширует зависимости и артефакты, настраивает уведомления и автоматический откат.",
+        "tools": []
+      },
+      "position": {
+        "x": 2160,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_105",
+      "type": "skill",
+      "label": "configure_github_gitlab_jenkins_cicd",
+      "config": {
+        "functionName": "configure_github_gitlab_jenkins_cicd",
+        "description": "Конфигурации GitHub Actions, GitLab CI, Jenkins",
+        "parameters": {}
+      },
+      "position": {
+        "x": 1860,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_106",
+      "type": "skill",
+      "label": "parallelize_pipeline_stages",
+      "config": {
+        "functionName": "parallelize_pipeline_stages",
+        "description": "Параллельные стадии",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2060,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_107",
+      "type": "skill",
+      "label": "cache_dependencies_and_artifacts",
+      "config": {
+        "functionName": "cache_dependencies_and_artifacts",
+        "description": "Кэширование зависимостей и артефактов",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2260,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_108",
+      "type": "skill",
+      "label": "notify_and_auto_rollback",
+      "config": {
+        "functionName": "notify_and_auto_rollback",
+        "description": "Уведомления и автоматический откат",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2460,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_28",
+      "type": "sub_agent",
+      "label": "Контейнеризатор",
+      "config": {
+        "instructions": "Пишет эффективные многоступенчатые Dockerfile, поддерживает docker-compose для разработки, минимизирует размер образа и обеспечивает запуск от непривилегированного пользователя.",
+        "tools": []
+      },
+      "position": {
+        "x": 2380,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_109",
+      "type": "skill",
+      "label": "write_multistage_dockerfiles",
+      "config": {
+        "functionName": "write_multistage_dockerfiles",
+        "description": "Эффективные Dockerfile (многоступенчатые сборки)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2080,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_110",
+      "type": "skill",
+      "label": "maintain_docker_compose",
+      "config": {
+        "functionName": "maintain_docker_compose",
+        "description": "docker-compose для разработки",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2280,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_111",
+      "type": "skill",
+      "label": "minimize_image_size",
+      "config": {
+        "functionName": "minimize_image_size",
+        "description": "Минимизация размера образа",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2480,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_112",
+      "type": "skill",
+      "label": "run_as_non_root",
+      "config": {
+        "functionName": "run_as_non_root",
+        "description": "Не-root пользователи",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2680,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_29",
+      "type": "sub_agent",
+      "label": "Менеджер окружений и секретов",
+      "config": {
+        "instructions": "Управляет переменными окружения для разных сред, работает с HashiCorp Vault, SOPS, инжектит секреты в CI/CD, поддерживает актуальный .env.example и документацию.",
+        "tools": []
+      },
+      "position": {
+        "x": 2600,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_113",
+      "type": "skill",
+      "label": "manage_env_per_stage",
+      "config": {
+        "functionName": "manage_env_per_stage",
+        "description": "Переменные окружения для разных сред",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2300,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_114",
+      "type": "skill",
+      "label": "integrate_hashicorp_vault_and_sops",
+      "config": {
+        "functionName": "integrate_hashicorp_vault_and_sops",
+        "description": "Работа с vault/секретами (HashiCorp Vault, SOPS)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2500,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_115",
+      "type": "skill",
+      "label": "inject_secrets_into_cicd",
+      "config": {
+        "functionName": "inject_secrets_into_cicd",
+        "description": "Инжекция секретов в CI/CD",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2700,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_116",
+      "type": "skill",
+      "label": "maintain_env_example_and_docs",
+      "config": {
+        "functionName": "maintain_env_example_and_docs",
+        "description": "Создание .env.example и документации",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2900,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_30",
+      "type": "sub_agent",
+      "label": "Разработчик Infrastructure as Code",
+      "config": {
+        "instructions": "Описывает инфраструктуру в Terraform, Pulumi или CloudFormation, версионирует и модуляризует код, планирует изменения и применяет их автоматически.",
+        "tools": []
+      },
+      "position": {
+        "x": 2820,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_117",
+      "type": "skill",
+      "label": "describe_infra_in_terraform_pulumi_cloudformation",
+      "config": {
+        "functionName": "describe_infra_in_terraform_pulumi_cloudformation",
+        "description": "Описание инфраструктуры (Terraform, Pulumi, CloudFormation)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2520,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_118",
+      "type": "skill",
+      "label": "version_iac_modules",
+      "config": {
+        "functionName": "version_iac_modules",
+        "description": "Версионирование и модульность",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2720,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_119",
+      "type": "skill",
+      "label": "plan_infrastructure_changes",
+      "config": {
+        "functionName": "plan_infrastructure_changes",
+        "description": "Планирование изменений",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2920,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_120",
+      "type": "skill",
+      "label": "auto_apply_infrastructure",
+      "config": {
+        "functionName": "auto_apply_infrastructure",
+        "description": "Автоматическое применение",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3120,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_31",
+      "type": "sub_agent",
+      "label": "Конфигуратор мониторинга и health-чеков",
+      "config": {
+        "instructions": "Настраивает сбор метрик (Prometheus, Datadog), строит дашборды и алерты, реализует readiness/liveness пробы в коде, подключает централизованное логирование (ELK, Loki) и трейсинг (OpenTelemetry).",
+        "tools": []
+      },
+      "position": {
+        "x": 3040,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_121",
+      "type": "skill",
+      "label": "collect_metrics_with_prometheus_datadog",
+      "config": {
+        "functionName": "collect_metrics_with_prometheus_datadog",
+        "description": "Сбор метрик (Prometheus, Datadog)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2740,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_122",
+      "type": "skill",
+      "label": "build_dashboards_and_alerts",
+      "config": {
+        "functionName": "build_dashboards_and_alerts",
+        "description": "Дашборды и алерты",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2940,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_123",
+      "type": "skill",
+      "label": "implement_readiness_and_liveness_probes",
+      "config": {
+        "functionName": "implement_readiness_and_liveness_probes",
+        "description": "Readiness/liveness пробы в коде",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3140,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_124",
+      "type": "skill",
+      "label": "centralize_logs_and_tracing",
+      "config": {
+        "functionName": "centralize_logs_and_tracing",
+        "description": "Централизованное логирование (ELK, Loki) и трейсинг (OpenTelemetry)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3340,
+        "y": 640
+      }
+    },
+    {
+      "id": "orch_7",
+      "type": "orchestrator",
+      "label": "Специалист по безопасности",
+      "config": {
+        "instructions": "Защищает систему от угроз. Делегирует задачи статического анализа уязвимостей, инъекционного тестирования, аудита аутентификации и авторизации, проверки зависимостей и безопасного хранения данных.",
+        "maxDelegations": 5
+      },
+      "position": {
+        "x": 3120,
+        "y": 0
+      }
+    },
+    {
+      "id": "agent_32",
+      "type": "sub_agent",
+      "label": "Статический анализатор уязвимостей",
+      "config": {
+        "instructions": "Запускает SAST-инструменты (Semgrep, SonarQube, CodeQL), ищет уязвимости по OWASP Top 10 и CWE, проверяет конфигурации по CIS, интегрирует проверки в CI.",
+        "tools": []
+      },
+      "position": {
+        "x": 2680,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_125",
+      "type": "skill",
+      "label": "run_sast_semgrep_sonarqube_codeql",
+      "config": {
+        "functionName": "run_sast_semgrep_sonarqube_codeql",
+        "description": "Запуск SAST (Semgrep, SonarQube, CodeQL)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2380,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_126",
+      "type": "skill",
+      "label": "search_owasp_top10_and_cwe",
+      "config": {
+        "functionName": "search_owasp_top10_and_cwe",
+        "description": "Поиск уязвимостей по OWASP Top 10, CWE",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2580,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_127",
+      "type": "skill",
+      "label": "audit_cis_benchmarks",
+      "config": {
+        "functionName": "audit_cis_benchmarks",
+        "description": "Анализ конфигураций безопасности (CIS)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2780,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_128",
+      "type": "skill",
+      "label": "integrate_sast_into_ci",
+      "config": {
+        "functionName": "integrate_sast_into_ci",
+        "description": "Интеграция в CI",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2980,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_33",
+      "type": "sub_agent",
+      "label": "Инъекционный тестер",
+      "config": {
+        "instructions": "Проверяет приложение на SQL-инъекции, XSS и command injection, анализирует обезвреживание ввода, проводит фаззинг, валидирует экранирование и параметризованные запросы.",
+        "tools": []
+      },
+      "position": {
+        "x": 2900,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_129",
+      "type": "skill",
+      "label": "test_sql_xss_command_injection",
+      "config": {
+        "functionName": "test_sql_xss_command_injection",
+        "description": "Проверка на SQL-инъекции, XSS, command injection",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2600,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_130",
+      "type": "skill",
+      "label": "audit_input_sanitization",
+      "config": {
+        "functionName": "audit_input_sanitization",
+        "description": "Анализ обезвреживания ввода",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2800,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_131",
+      "type": "skill",
+      "label": "run_fuzzing",
+      "config": {
+        "functionName": "run_fuzzing",
+        "description": "Фаззинг",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3000,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_132",
+      "type": "skill",
+      "label": "verify_escaping_and_parameterized_queries",
+      "config": {
+        "functionName": "verify_escaping_and_parameterized_queries",
+        "description": "Проверка экранирования и параметризованных запросов",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3200,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_34",
+      "type": "sub_agent",
+      "label": "Аналитик аутентификации и авторизации",
+      "config": {
+        "instructions": "Аудит механизмов входа (JWT/OAuth), проверяет ролевую модель (RBAC/ABAC), тестирует сценарии повышения привилегий, контролирует безопасное хранение токенов и паролей.",
+        "tools": []
+      },
+      "position": {
+        "x": 3120,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_133",
+      "type": "skill",
+      "label": "audit_jwt_and_oauth",
+      "config": {
+        "functionName": "audit_jwt_and_oauth",
+        "description": "Аудит механизмов входа, JWT/OAuth",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2820,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_134",
+      "type": "skill",
+      "label": "review_rbac_and_abac_models",
+      "config": {
+        "functionName": "review_rbac_and_abac_models",
+        "description": "Проверка ролевой модели (RBAC/ABAC)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3020,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_135",
+      "type": "skill",
+      "label": "test_privilege_escalation",
+      "config": {
+        "functionName": "test_privilege_escalation",
+        "description": "Тестирование на повышение привилегий",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3220,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_136",
+      "type": "skill",
+      "label": "secure_tokens_and_passwords",
+      "config": {
+        "functionName": "secure_tokens_and_passwords",
+        "description": "Безопасное хранение токенов и паролей",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3420,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_35",
+      "type": "sub_agent",
+      "label": "Аудитор зависимостей",
+      "config": {
+        "instructions": "Сканирует зависимости (npm audit, OWASP Dependency-Check), оценивает риск и рекомендует фиксы, проверяет целостность через SBOM, мониторит появление новых CVE.",
+        "tools": []
+      },
+      "position": {
+        "x": 3340,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_137",
+      "type": "skill",
+      "label": "scan_dependencies_npm_audit_owasp_dep_check",
+      "config": {
+        "functionName": "scan_dependencies_npm_audit_owasp_dep_check",
+        "description": "Сканирование зависимостей (npm audit, OWASP Dependency-Check)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3040,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_138",
+      "type": "skill",
+      "label": "assess_dependency_risk",
+      "config": {
+        "functionName": "assess_dependency_risk",
+        "description": "Оценка риска и рекомендации",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3240,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_139",
+      "type": "skill",
+      "label": "verify_sbom_integrity",
+      "config": {
+        "functionName": "verify_sbom_integrity",
+        "description": "Проверка целостности (SBOM)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3440,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_140",
+      "type": "skill",
+      "label": "monitor_new_cves",
+      "config": {
+        "functionName": "monitor_new_cves",
+        "description": "Мониторинг новых CVE",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3640,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_36",
+      "type": "sub_agent",
+      "label": "Советник по безопасному хранению данных",
+      "config": {
+        "instructions": "Шифрует данные в покое и при передаче, маскирует чувствительные данные в логах, контролирует PII по GDPR/HIPAA, настраивает безопасные cookie, CORS и CSP.",
+        "tools": []
+      },
+      "position": {
+        "x": 3560,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_141",
+      "type": "skill",
+      "label": "encrypt_data_at_rest_and_in_transit",
+      "config": {
+        "functionName": "encrypt_data_at_rest_and_in_transit",
+        "description": "Шифрование данных в покое и при передаче",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3260,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_142",
+      "type": "skill",
+      "label": "mask_sensitive_data_in_logs",
+      "config": {
+        "functionName": "mask_sensitive_data_in_logs",
+        "description": "Маскирование чувствительных данных в логах",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3460,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_143",
+      "type": "skill",
+      "label": "enforce_pii_compliance_gdpr_hipaa",
+      "config": {
+        "functionName": "enforce_pii_compliance_gdpr_hipaa",
+        "description": "Контроль PII (GDPR, HIPAA)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3660,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_144",
+      "type": "skill",
+      "label": "configure_secure_cookies_cors_csp",
+      "config": {
+        "functionName": "configure_secure_cookies_cors_csp",
+        "description": "Настройка безопасных cookie, CORS, CSP",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3860,
+        "y": 640
+      }
+    },
+    {
+      "id": "orch_8",
+      "type": "orchestrator",
+      "label": "Технический писатель",
+      "config": {
+        "instructions": "Создаёт и поддерживает техническую документацию. Делегирует задачи генерации README, документирования API, ведения ADR, ведения CHANGELOG и автодокументирования кода.",
+        "maxDelegations": 5
+      },
+      "position": {
+        "x": 3640,
+        "y": 0
+      }
+    },
+    {
+      "id": "agent_37",
+      "type": "sub_agent",
+      "label": "Генератор README и инструкций",
+      "config": {
+        "instructions": "Автоматически наполняет разделы README: установка, запуск, примеры; подтягивает реальные команды и пути из проекта; добавляет бейджи CI, покрытия и лицензии; адаптирует тон под аудиторию.",
+        "tools": []
+      },
+      "position": {
+        "x": 3200,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_145",
+      "type": "skill",
+      "label": "populate_readme_sections",
+      "config": {
+        "functionName": "populate_readme_sections",
+        "description": "Автоматическое заполнение разделов: установка, запуск, примеры",
+        "parameters": {}
+      },
+      "position": {
+        "x": 2900,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_146",
+      "type": "skill",
+      "label": "extract_real_commands_and_paths",
+      "config": {
+        "functionName": "extract_real_commands_and_paths",
+        "description": "Реальные команды и пути из проекта",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3100,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_147",
+      "type": "skill",
+      "label": "add_status_badges",
+      "config": {
+        "functionName": "add_status_badges",
+        "description": "Бейджи (CI, покрытие, лицензия)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3300,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_148",
+      "type": "skill",
+      "label": "tailor_docs_for_audience",
+      "config": {
+        "functionName": "tailor_docs_for_audience",
+        "description": "Адаптация под аудиторию",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3500,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_38",
+      "type": "sub_agent",
+      "label": "Документатор API",
+      "config": {
+        "instructions": "Генерирует OpenAPI-спецификацию из кода и аннотаций, описывает эндпоинты, параметры, ответы и ошибки, синхронизирует спецификацию с кодом, публикует её в Swagger UI или Redoc.",
+        "tools": []
+      },
+      "position": {
+        "x": 3420,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_149",
+      "type": "skill",
+      "label": "generate_openapi_from_code",
+      "config": {
+        "functionName": "generate_openapi_from_code",
+        "description": "Генерация спецификации из кода/аннотаций",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3120,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_150",
+      "type": "skill",
+      "label": "describe_endpoints_params_responses_errors",
+      "config": {
+        "functionName": "describe_endpoints_params_responses_errors",
+        "description": "Описание эндпоинтов, параметров, ответов, ошибок",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3320,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_151",
+      "type": "skill",
+      "label": "sync_openapi_with_code",
+      "config": {
+        "functionName": "sync_openapi_with_code",
+        "description": "Синхронизация с кодом",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3520,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_152",
+      "type": "skill",
+      "label": "publish_swagger_ui_or_redoc",
+      "config": {
+        "functionName": "publish_swagger_ui_or_redoc",
+        "description": "Публикация (Swagger UI, Redoc)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3720,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_39",
+      "type": "sub_agent",
+      "label": "Архитектурный летописец",
+      "config": {
+        "instructions": "Ведёт Architecture Decision Records по шаблону MADR/Nygard, фиксирует контекст, решение и последствия, хранит их в `docs/adr/`, связывает ADR с кодом и issue.",
+        "tools": []
+      },
+      "position": {
+        "x": 3640,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_153",
+      "type": "skill",
+      "label": "write_adr_by_template",
+      "config": {
+        "functionName": "write_adr_by_template",
+        "description": "Ведение Architecture Decision Records по шаблону",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3340,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_154",
+      "type": "skill",
+      "label": "capture_context_decision_consequences",
+      "config": {
+        "functionName": "capture_context_decision_consequences",
+        "description": "Фиксация контекста, решения, последствий",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3540,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_155",
+      "type": "skill",
+      "label": "store_adrs_in_docs_adr",
+      "config": {
+        "functionName": "store_adrs_in_docs_adr",
+        "description": "Хранение в `docs/adr/`",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3740,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_156",
+      "type": "skill",
+      "label": "link_adrs_with_code_and_issues",
+      "config": {
+        "functionName": "link_adrs_with_code_and_issues",
+        "description": "Связывание с кодом и issue",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3940,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_40",
+      "type": "sub_agent",
+      "label": "Хронист CHANGELOG",
+      "config": {
+        "instructions": "Генерирует журнал изменений на основе conventional commits, группирует записи по feat, fix и breaking, проставляет ссылки на issue и PR, готовит release notes.",
+        "tools": []
+      },
+      "position": {
+        "x": 3860,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_157",
+      "type": "skill",
+      "label": "generate_changelog_from_conventional_commits",
+      "config": {
+        "functionName": "generate_changelog_from_conventional_commits",
+        "description": "Генерация журнала изменений на основе conventional commits",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3560,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_158",
+      "type": "skill",
+      "label": "group_by_feat_fix_breaking",
+      "config": {
+        "functionName": "group_by_feat_fix_breaking",
+        "description": "Группировка feat, fix, breaking",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3760,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_159",
+      "type": "skill",
+      "label": "link_issue_and_pr",
+      "config": {
+        "functionName": "link_issue_and_pr",
+        "description": "Ссылки на issue и PR",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3960,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_160",
+      "type": "skill",
+      "label": "prepare_release_notes",
+      "config": {
+        "functionName": "prepare_release_notes",
+        "description": "Подготовка release notes",
+        "parameters": {}
+      },
+      "position": {
+        "x": 4160,
+        "y": 640
+      }
+    },
+    {
+      "id": "agent_41",
+      "type": "sub_agent",
+      "label": "Автодокументатор кода",
+      "config": {
+        "instructions": "Создаёт справочники API кода (JSDoc, pydoc, godoc), документирует публичные интерфейсы и типы, интегрируется с TypeDoc и Sphinx, проверяет полноту покрытия документацией.",
+        "tools": []
+      },
+      "position": {
+        "x": 4080,
+        "y": 320
+      }
+    },
+    {
+      "id": "skill_161",
+      "type": "skill",
+      "label": "generate_api_reference_jsdoc_pydoc_godoc",
+      "config": {
+        "functionName": "generate_api_reference_jsdoc_pydoc_godoc",
+        "description": "Справочники API кода (JSDoc, pydoc, godoc)",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3780,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_162",
+      "type": "skill",
+      "label": "document_public_interfaces_and_types",
+      "config": {
+        "functionName": "document_public_interfaces_and_types",
+        "description": "Документирование публичных интерфейсов и типов",
+        "parameters": {}
+      },
+      "position": {
+        "x": 3980,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_163",
+      "type": "skill",
+      "label": "integrate_typedoc_and_sphinx",
+      "config": {
+        "functionName": "integrate_typedoc_and_sphinx",
+        "description": "Интеграция с TypeDoc, Sphinx",
+        "parameters": {}
+      },
+      "position": {
+        "x": 4180,
+        "y": 640
+      }
+    },
+    {
+      "id": "skill_164",
+      "type": "skill",
+      "label": "verify_doc_coverage",
+      "config": {
+        "functionName": "verify_doc_coverage",
+        "description": "Проверка полноты покрытия документацией",
+        "parameters": {}
+      },
+      "position": {
+        "x": 4380,
+        "y": 640
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge_1",
+      "source": "orch_1",
+      "target": "agent_1",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_2",
+      "source": "agent_1",
+      "target": "skill_1",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_3",
+      "source": "agent_1",
+      "target": "skill_2",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_4",
+      "source": "agent_1",
+      "target": "skill_3",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_5",
+      "source": "agent_1",
+      "target": "skill_4",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_6",
+      "source": "orch_1",
+      "target": "agent_2",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_7",
+      "source": "agent_2",
+      "target": "skill_5",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_8",
+      "source": "agent_2",
+      "target": "skill_6",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_9",
+      "source": "agent_2",
+      "target": "skill_7",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_10",
+      "source": "agent_2",
+      "target": "skill_8",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_11",
+      "source": "orch_1",
+      "target": "agent_3",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_12",
+      "source": "agent_3",
+      "target": "skill_9",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_13",
+      "source": "agent_3",
+      "target": "skill_10",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_14",
+      "source": "agent_3",
+      "target": "skill_11",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_15",
+      "source": "agent_3",
+      "target": "skill_12",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_16",
+      "source": "orch_1",
+      "target": "agent_4",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_17",
+      "source": "agent_4",
+      "target": "skill_13",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_18",
+      "source": "agent_4",
+      "target": "skill_14",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_19",
+      "source": "agent_4",
+      "target": "skill_15",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_20",
+      "source": "agent_4",
+      "target": "skill_16",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_21",
+      "source": "orch_1",
+      "target": "agent_5",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_22",
+      "source": "agent_5",
+      "target": "skill_17",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_23",
+      "source": "agent_5",
+      "target": "skill_18",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_24",
+      "source": "agent_5",
+      "target": "skill_19",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_25",
+      "source": "agent_5",
+      "target": "skill_20",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_26",
+      "source": "orch_2",
+      "target": "agent_6",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_27",
+      "source": "agent_6",
+      "target": "skill_21",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_28",
+      "source": "agent_6",
+      "target": "skill_22",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_29",
+      "source": "agent_6",
+      "target": "skill_23",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_30",
+      "source": "agent_6",
+      "target": "skill_24",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_31",
+      "source": "orch_2",
+      "target": "agent_7",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_32",
+      "source": "agent_7",
+      "target": "skill_25",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_33",
+      "source": "agent_7",
+      "target": "skill_26",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_34",
+      "source": "agent_7",
+      "target": "skill_27",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_35",
+      "source": "agent_7",
+      "target": "skill_28",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_36",
+      "source": "orch_2",
+      "target": "agent_8",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_37",
+      "source": "agent_8",
+      "target": "skill_29",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_38",
+      "source": "agent_8",
+      "target": "skill_30",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_39",
+      "source": "agent_8",
+      "target": "skill_31",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_40",
+      "source": "agent_8",
+      "target": "skill_32",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_41",
+      "source": "orch_2",
+      "target": "agent_9",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_42",
+      "source": "agent_9",
+      "target": "skill_33",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_43",
+      "source": "agent_9",
+      "target": "skill_34",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_44",
+      "source": "agent_9",
+      "target": "skill_35",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_45",
+      "source": "agent_9",
+      "target": "skill_36",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_46",
+      "source": "orch_2",
+      "target": "agent_10",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_47",
+      "source": "agent_10",
+      "target": "skill_37",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_48",
+      "source": "agent_10",
+      "target": "skill_38",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_49",
+      "source": "agent_10",
+      "target": "skill_39",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_50",
+      "source": "agent_10",
+      "target": "skill_40",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_51",
+      "source": "orch_3",
+      "target": "agent_11",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_52",
+      "source": "agent_11",
+      "target": "skill_41",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_53",
+      "source": "agent_11",
+      "target": "skill_42",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_54",
+      "source": "agent_11",
+      "target": "skill_43",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_55",
+      "source": "agent_11",
+      "target": "skill_44",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_56",
+      "source": "orch_3",
+      "target": "agent_12",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_57",
+      "source": "agent_12",
+      "target": "skill_45",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_58",
+      "source": "agent_12",
+      "target": "skill_46",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_59",
+      "source": "agent_12",
+      "target": "skill_47",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_60",
+      "source": "agent_12",
+      "target": "skill_48",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_61",
+      "source": "orch_3",
+      "target": "agent_13",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_62",
+      "source": "agent_13",
+      "target": "skill_49",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_63",
+      "source": "agent_13",
+      "target": "skill_50",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_64",
+      "source": "agent_13",
+      "target": "skill_51",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_65",
+      "source": "agent_13",
+      "target": "skill_52",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_66",
+      "source": "orch_3",
+      "target": "agent_14",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_67",
+      "source": "agent_14",
+      "target": "skill_53",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_68",
+      "source": "agent_14",
+      "target": "skill_54",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_69",
+      "source": "agent_14",
+      "target": "skill_55",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_70",
+      "source": "agent_14",
+      "target": "skill_56",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_71",
+      "source": "orch_3",
+      "target": "agent_15",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_72",
+      "source": "agent_15",
+      "target": "skill_57",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_73",
+      "source": "agent_15",
+      "target": "skill_58",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_74",
+      "source": "agent_15",
+      "target": "skill_59",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_75",
+      "source": "agent_15",
+      "target": "skill_60",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_76",
+      "source": "orch_4",
+      "target": "agent_16",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_77",
+      "source": "agent_16",
+      "target": "skill_61",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_78",
+      "source": "agent_16",
+      "target": "skill_62",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_79",
+      "source": "agent_16",
+      "target": "skill_63",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_80",
+      "source": "agent_16",
+      "target": "skill_64",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_81",
+      "source": "orch_4",
+      "target": "agent_17",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_82",
+      "source": "agent_17",
+      "target": "skill_65",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_83",
+      "source": "agent_17",
+      "target": "skill_66",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_84",
+      "source": "agent_17",
+      "target": "skill_67",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_85",
+      "source": "agent_17",
+      "target": "skill_68",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_86",
+      "source": "orch_4",
+      "target": "agent_18",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_87",
+      "source": "agent_18",
+      "target": "skill_69",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_88",
+      "source": "agent_18",
+      "target": "skill_70",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_89",
+      "source": "agent_18",
+      "target": "skill_71",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_90",
+      "source": "agent_18",
+      "target": "skill_72",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_91",
+      "source": "orch_4",
+      "target": "agent_19",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_92",
+      "source": "agent_19",
+      "target": "skill_73",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_93",
+      "source": "agent_19",
+      "target": "skill_74",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_94",
+      "source": "agent_19",
+      "target": "skill_75",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_95",
+      "source": "agent_19",
+      "target": "skill_76",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_96",
+      "source": "orch_4",
+      "target": "agent_20",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_97",
+      "source": "agent_20",
+      "target": "skill_77",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_98",
+      "source": "agent_20",
+      "target": "skill_78",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_99",
+      "source": "agent_20",
+      "target": "skill_79",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_100",
+      "source": "agent_20",
+      "target": "skill_80",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_101",
+      "source": "orch_4",
+      "target": "agent_21",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_102",
+      "source": "agent_21",
+      "target": "skill_81",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_103",
+      "source": "agent_21",
+      "target": "skill_82",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_104",
+      "source": "agent_21",
+      "target": "skill_83",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_105",
+      "source": "agent_21",
+      "target": "skill_84",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_106",
+      "source": "orch_5",
+      "target": "agent_22",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_107",
+      "source": "agent_22",
+      "target": "skill_85",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_108",
+      "source": "agent_22",
+      "target": "skill_86",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_109",
+      "source": "agent_22",
+      "target": "skill_87",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_110",
+      "source": "agent_22",
+      "target": "skill_88",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_111",
+      "source": "orch_5",
+      "target": "agent_23",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_112",
+      "source": "agent_23",
+      "target": "skill_89",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_113",
+      "source": "agent_23",
+      "target": "skill_90",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_114",
+      "source": "agent_23",
+      "target": "skill_91",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_115",
+      "source": "agent_23",
+      "target": "skill_92",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_116",
+      "source": "orch_5",
+      "target": "agent_24",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_117",
+      "source": "agent_24",
+      "target": "skill_93",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_118",
+      "source": "agent_24",
+      "target": "skill_94",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_119",
+      "source": "agent_24",
+      "target": "skill_95",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_120",
+      "source": "agent_24",
+      "target": "skill_96",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_121",
+      "source": "orch_5",
+      "target": "agent_25",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_122",
+      "source": "agent_25",
+      "target": "skill_97",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_123",
+      "source": "agent_25",
+      "target": "skill_98",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_124",
+      "source": "agent_25",
+      "target": "skill_99",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_125",
+      "source": "agent_25",
+      "target": "skill_100",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_126",
+      "source": "orch_5",
+      "target": "agent_26",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_127",
+      "source": "agent_26",
+      "target": "skill_101",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_128",
+      "source": "agent_26",
+      "target": "skill_102",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_129",
+      "source": "agent_26",
+      "target": "skill_103",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_130",
+      "source": "agent_26",
+      "target": "skill_104",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_131",
+      "source": "orch_6",
+      "target": "agent_27",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_132",
+      "source": "agent_27",
+      "target": "skill_105",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_133",
+      "source": "agent_27",
+      "target": "skill_106",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_134",
+      "source": "agent_27",
+      "target": "skill_107",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_135",
+      "source": "agent_27",
+      "target": "skill_108",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_136",
+      "source": "orch_6",
+      "target": "agent_28",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_137",
+      "source": "agent_28",
+      "target": "skill_109",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_138",
+      "source": "agent_28",
+      "target": "skill_110",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_139",
+      "source": "agent_28",
+      "target": "skill_111",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_140",
+      "source": "agent_28",
+      "target": "skill_112",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_141",
+      "source": "orch_6",
+      "target": "agent_29",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_142",
+      "source": "agent_29",
+      "target": "skill_113",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_143",
+      "source": "agent_29",
+      "target": "skill_114",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_144",
+      "source": "agent_29",
+      "target": "skill_115",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_145",
+      "source": "agent_29",
+      "target": "skill_116",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_146",
+      "source": "orch_6",
+      "target": "agent_30",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_147",
+      "source": "agent_30",
+      "target": "skill_117",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_148",
+      "source": "agent_30",
+      "target": "skill_118",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_149",
+      "source": "agent_30",
+      "target": "skill_119",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_150",
+      "source": "agent_30",
+      "target": "skill_120",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_151",
+      "source": "orch_6",
+      "target": "agent_31",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_152",
+      "source": "agent_31",
+      "target": "skill_121",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_153",
+      "source": "agent_31",
+      "target": "skill_122",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_154",
+      "source": "agent_31",
+      "target": "skill_123",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_155",
+      "source": "agent_31",
+      "target": "skill_124",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_156",
+      "source": "orch_7",
+      "target": "agent_32",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_157",
+      "source": "agent_32",
+      "target": "skill_125",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_158",
+      "source": "agent_32",
+      "target": "skill_126",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_159",
+      "source": "agent_32",
+      "target": "skill_127",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_160",
+      "source": "agent_32",
+      "target": "skill_128",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_161",
+      "source": "orch_7",
+      "target": "agent_33",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_162",
+      "source": "agent_33",
+      "target": "skill_129",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_163",
+      "source": "agent_33",
+      "target": "skill_130",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_164",
+      "source": "agent_33",
+      "target": "skill_131",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_165",
+      "source": "agent_33",
+      "target": "skill_132",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_166",
+      "source": "orch_7",
+      "target": "agent_34",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_167",
+      "source": "agent_34",
+      "target": "skill_133",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_168",
+      "source": "agent_34",
+      "target": "skill_134",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_169",
+      "source": "agent_34",
+      "target": "skill_135",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_170",
+      "source": "agent_34",
+      "target": "skill_136",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_171",
+      "source": "orch_7",
+      "target": "agent_35",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_172",
+      "source": "agent_35",
+      "target": "skill_137",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_173",
+      "source": "agent_35",
+      "target": "skill_138",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_174",
+      "source": "agent_35",
+      "target": "skill_139",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_175",
+      "source": "agent_35",
+      "target": "skill_140",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_176",
+      "source": "orch_7",
+      "target": "agent_36",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_177",
+      "source": "agent_36",
+      "target": "skill_141",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_178",
+      "source": "agent_36",
+      "target": "skill_142",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_179",
+      "source": "agent_36",
+      "target": "skill_143",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_180",
+      "source": "agent_36",
+      "target": "skill_144",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_181",
+      "source": "orch_8",
+      "target": "agent_37",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_182",
+      "source": "agent_37",
+      "target": "skill_145",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_183",
+      "source": "agent_37",
+      "target": "skill_146",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_184",
+      "source": "agent_37",
+      "target": "skill_147",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_185",
+      "source": "agent_37",
+      "target": "skill_148",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_186",
+      "source": "orch_8",
+      "target": "agent_38",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_187",
+      "source": "agent_38",
+      "target": "skill_149",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_188",
+      "source": "agent_38",
+      "target": "skill_150",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_189",
+      "source": "agent_38",
+      "target": "skill_151",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_190",
+      "source": "agent_38",
+      "target": "skill_152",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_191",
+      "source": "orch_8",
+      "target": "agent_39",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_192",
+      "source": "agent_39",
+      "target": "skill_153",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_193",
+      "source": "agent_39",
+      "target": "skill_154",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_194",
+      "source": "agent_39",
+      "target": "skill_155",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_195",
+      "source": "agent_39",
+      "target": "skill_156",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_196",
+      "source": "orch_8",
+      "target": "agent_40",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_197",
+      "source": "agent_40",
+      "target": "skill_157",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_198",
+      "source": "agent_40",
+      "target": "skill_158",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_199",
+      "source": "agent_40",
+      "target": "skill_159",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_200",
+      "source": "agent_40",
+      "target": "skill_160",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_201",
+      "source": "orch_8",
+      "target": "agent_41",
+      "edgeType": "delegation"
+    },
+    {
+      "id": "edge_202",
+      "source": "agent_41",
+      "target": "skill_161",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_203",
+      "source": "agent_41",
+      "target": "skill_162",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_204",
+      "source": "agent_41",
+      "target": "skill_163",
+      "edgeType": "skill_attachment"
+    },
+    {
+      "id": "edge_205",
+      "source": "agent_41",
+      "target": "skill_164",
+      "edgeType": "skill_attachment"
+    }
+  ]
+}
