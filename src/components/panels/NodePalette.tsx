@@ -1,12 +1,22 @@
 import { useState } from 'react';
 import type { NodeType } from '../../types';
-import { Sparkles, Bot, Wrench, GripVertical } from 'lucide-react';
+import { Sparkles, Bot, Wrench, GripVertical, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface NodePaletteProps {
   onDragStart: (event: React.DragEvent, nodeType: NodeType) => void;
 }
 
-const paletteItems: { type: NodeType; label: string; description: string; icon: React.ReactNode; gradient: string; borderColor: string; hoverGradient: string }[] = [
+interface PaletteItem {
+  type: NodeType;
+  label: string;
+  description: string;
+  icon: React.ReactNode;
+  gradient: string;
+  borderColor: string;
+  hoverGradient: string;
+}
+
+const paletteItems: PaletteItem[] = [
   {
     type: 'orchestrator',
     label: 'Orchestrator',
@@ -38,13 +48,70 @@ const paletteItems: { type: NodeType; label: string; description: string; icon: 
 
 const NodePalette = ({ onDragStart }: NodePaletteProps) => {
   const [draggingItem, setDraggingItem] = useState<NodeType | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
+
+  if (collapsed) {
+    return (
+      <div className="w-16 bg-gradient-to-b from-slate-900 via-slate-900/95 to-slate-950 border-r border-slate-700/50 flex flex-col">
+        {/* Header with expand button */}
+        <div className="p-2 border-b border-slate-700/50 flex justify-center">
+          <button
+            onClick={() => setCollapsed(false)}
+            title="Expand palette"
+            aria-label="Expand palette"
+            className="p-2 rounded-lg bg-slate-800/50 hover:bg-slate-700/60 text-slate-400 hover:text-white border border-slate-700/50 transition-colors"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Compact icons stack */}
+        <div className="flex-1 overflow-y-auto p-2 space-y-2 flex flex-col items-center">
+          {paletteItems.map((item) => (
+            <div
+              key={item.type}
+              draggable
+              onDragStart={(e) => {
+                setDraggingItem(item.type);
+                onDragStart(e, item.type);
+              }}
+              onDragEnd={() => setDraggingItem(null)}
+              title={item.label}
+              aria-label={`Drag ${item.label}`}
+              className={`
+                group relative p-2 rounded-xl cursor-grab active:cursor-grabbing
+                bg-slate-800/50 backdrop-blur-sm border ${item.borderColor}
+                transition-all duration-200 ease-out
+                hover:bg-slate-800/80
+                ${draggingItem === item.type ? 'opacity-50 scale-95' : ''}
+              `}
+            >
+              <div className={`
+                relative p-1.5 rounded-lg bg-gradient-to-br ${item.gradient}
+                shadow-lg
+              `}>
+                <div className="relative text-white">
+                  {item.icon}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Footer grip indicator */}
+        <div className="p-2 border-t border-slate-700/50 flex justify-center">
+          <GripVertical className="w-4 h-4 text-slate-600" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-72 bg-gradient-to-b from-slate-900 via-slate-900/95 to-slate-950 border-r border-slate-700/50 flex flex-col">
       {/* Header */}
       <div className="p-5 border-b border-slate-700/50">
         <div className="flex items-center gap-3">
-          <div className="relative">
+          <div className="relative flex-shrink-0">
             <div className="absolute inset-0 bg-indigo-500/30 blur-lg rounded-lg" />
             <div className="relative p-2 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg">
               <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -52,10 +119,18 @@ const NodePalette = ({ onDragStart }: NodePaletteProps) => {
               </svg>
             </div>
           </div>
-          <div>
+          <div className="flex-1 min-w-0">
             <h2 className="text-lg font-bold text-white">Components</h2>
             <p className="text-xs text-slate-500">Drag to canvas</p>
           </div>
+          <button
+            onClick={() => setCollapsed(true)}
+            title="Collapse palette"
+            aria-label="Collapse palette"
+            className="flex-shrink-0 p-1.5 rounded-lg hover:bg-slate-800/60 text-slate-400 hover:text-white border border-transparent hover:border-slate-700/50 transition-colors"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
         </div>
       </div>
 
@@ -91,7 +166,7 @@ const NodePalette = ({ onDragStart }: NodePaletteProps) => {
 
             <div className="relative flex items-start gap-3 pl-4">
               <div className={`
-                relative p-2.5 rounded-xl bg-gradient-to-br ${item.gradient} 
+                relative p-2.5 rounded-xl bg-gradient-to-br ${item.gradient}
                 shadow-lg transition-transform duration-300 group-hover:scale-110 group-hover:rotate-3
               `}>
                 <div className="absolute inset-0 bg-white/20 rounded-xl blur-sm opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -99,7 +174,7 @@ const NodePalette = ({ onDragStart }: NodePaletteProps) => {
                   {item.icon}
                 </div>
               </div>
-              
+
               <div className="flex-1 min-w-0">
                 <h3 className="font-semibold text-white text-sm mb-0.5">{item.label}</h3>
                 <p className="text-xs text-slate-400 leading-relaxed">{item.description}</p>

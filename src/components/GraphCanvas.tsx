@@ -41,7 +41,7 @@ const defaultEdgeOptions = {
 const GraphCanvas = () => {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const { screenToFlowPosition, fitView } = useReactFlow();
-  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, addNode, selectNode, setNodesPositions } = useGraphStore();
+  const { nodes, edges, selectedNodeId, onNodesChange, onEdgesChange, onConnect, addNode, selectNode, setNodesPositions } = useGraphStore();
 
   const onDragStart = useCallback(
     (event: React.DragEvent, nodeType: NodeType) => {
@@ -214,7 +214,7 @@ const GraphCanvas = () => {
           )}
         </div>
         
-        <PropertiesPanel />
+        {selectedNodeId !== null && <PropertiesPanel />}
       </div>
     </div>
   );
