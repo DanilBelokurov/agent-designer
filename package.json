@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "server": "node server/server.js",
+    "server": "npm run build && node server/prod-server.mjs",
+    "prod": "node server/prod-server.mjs",
     "grammars": "node scripts/fetch-grammars.cjs",
     "build": "tsc -b && vite build",
     "lint": "oxlint",

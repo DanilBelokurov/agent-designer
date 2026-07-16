@@ -27,7 +27,7 @@ The app is purely client-side; there is no backend.
 | State | `zustand` 5 | one graph store + one FS store; React Flow's local change events are forwarded into the graph store |
 | Icons | `lucide-react` 1.x | used in nodes, panels, toolbar, controls |
 | Styling | Tailwind CSS 3 + PostCSS | glassmorphism via `src/index.css` `@layer components` |
-| Bridge server | Node `http` built-in | `server/server.js`, no extra deps; `npm run server` |
+| Bridge server | Node `http` built-in | `server/qwenHandler.mjs` (shared), `server/prod-server.mjs` (prod), Vite middleware in `vite.config.ts` (dev) — no extra deps; `npm run dev` (5173) and `npm run server` (3001) |
 | Lint | `oxlint` (`npm run lint`) | |
 | Entry | `src/main.tsx` → `src/App.tsx` (wraps `<GraphCanvas>` in `<ReactFlowProvider>`) | |
 
@@ -51,7 +51,8 @@ agent-graph-designer/
 │   ├── generate-base-config.cjs      # Node script that builds base-config.json
 │   └── fetch-grammars.cjs            # vendor tree-sitter WASM into public/grammars/
 ├── server/
-│   └── server.js                     # local bridge: POST /generate → `qwen -p`
+│   ├── qwenHandler.mjs               # shared request handler for /generate and /health
+│   └── prod-server.mjs               # single-port prod entrypoint: dist/ + /generate on PORT
 ├── src/
 │   ├── main.tsx                      # ReactDOM.createRoot
 │   ├── App.tsx                       # ReactFlowProvider + GraphCanvas
@@ -300,13 +301,20 @@ Returns `Record<nodeId, { x, y }>`. Nodes without a computed position keep their
 
 ## 11. Build & dev commands
 
+Single-port rule: the React app and the qwen bridge share one origin — port
+`5173` in dev (Vite) and port `3001` in prod (`server/prod-server.mjs`).
+The client (`src/services/qwenClient.ts`) posts to relative `/generate`.
+
 ```sh
 npm install
-npm run dev        # http://localhost:5173 (vite default)
-npm run server     # local Qwen bridge on http://localhost:3001
+node scripts/fetch-grammars.cjs   # vendor tree-sitter WASM into public/grammars/
+
+npm run dev        # vite @ :5173, /generate middleware active
 npm run build      # tsc -b + vite build → dist/
+npm run prod       # node server/prod-server.mjs @ :3001 (serves dist + /generate)
+npm run server     # build && prod
+npm run preview    # vite preview @ :4173, /generate middleware active
 npm run lint       # oxlint
-npm run preview    # serve dist/
 
 # Regenerate base-config.json:
 node scripts/generate-base-config.cjs
@@ -317,15 +325,26 @@ node scripts/generate-base-config.cjs
 ## 12. Instruction generator (Qwen integration)
 
 Generate a Markdown instruction for any node using a locally-installed Qwen
-CLI. The browser cannot spawn processes, so a tiny Node bridge is required.
+CLI. The browser cannot spawn processes, so a tiny Node bridge is required —
+and it lives on the **same origin** as the web app:
+
+| Runtime | Mount point | Server file |
+|---|---|---|
+| Vite dev / `vite preview` | `server.middlewares` for `/generate`, `/health` | `vite.config.ts` → `qwenBridge()` plugin |
+| Production | Combined `dist/` + bridge in one Node process | `server/prod-server.mjs` |
+
+Both mount points delegate to the same handler in `server/qwenHandler.mjs`,
+so there is exactly one `qwen -p` implementation across the whole project.
 
 ### Components
 
 | Piece | Role |
 |---|---|
-| `server/server.js` | HTTP server on `127.0.0.1:3001`. Endpoints: `POST /generate` (spawns `qwen -p <prompt>`, returns `{ result, error }`), `GET /health` (echoes config). CORS-allowed origin defaults to `http://localhost:5173`. Configurable via env: `PORT`, `HOST`, `QWEN_COMMAND`, `QWEN_TIMEOUT_MS`, `CORS_ORIGIN`. |
-| `src/services/qwenClient.ts` | `generateViaQwen(prompt)` posts to the bridge and throws `QwenUnavailableError` with a friendly message on any failure (network, non-2xx, spawn error, timeout). Also has `checkHealth`. |
-| `src/services/instructionGenerator.ts` | `buildPromptForNode(node, userRequest, ctx)` assembles the prompt (node metadata + upstream/downstream labels + per-type required sections). `relativePathForNode(node)` returns `agents/<slug>/AGENT.md` or `skills/<slug>/SKILL.md`. |
+| `server/qwenHandler.mjs` | Shared handler. Exports `handleGenerate(req, res)`, `handleHealth(req, res)`, and a one-shot `dispatchBridge(req, res, urlPath)`. Reads `{prompt}` body, validates, spawns `qwen -p <prompt>`, returns `{ result, error }`. Honours `QWEN_COMMAND` and `QWEN_TIMEOUT_MS`. |
+| `vite.config.ts` | Vite plugin that dynamic-imports the handler in `configureServer` (dev) and `configurePreviewServer` (preview) and adds `qwenBridge()` middleware. Lives entirely inside the `5173` origin. |
+| `server/prod-server.mjs` | Single-port production entrypoint. Muxes `/generate`, `/health` → `dispatchBridge`, anything else → `dist/<file>` with SPA fallback to `index.html`. Reads env: `PORT` (default 3001), `HOST` (default 127.0.0.1). |
+| `src/services/qwenClient.ts` | `generateViaQwen(prompt)` posts to **relative** `/generate` and throws `QwenUnavailableError` with a friendly message on any failure (network, non-2xx, spawn error, timeout). `checkHealth` queries `/health`. `serverUrl` opt remains for power users. |
+| `src/services/instructionGenerator.ts` | `buildPromptForNode(node, userRequest, ctx)` assembles the prompt (node metadata + upstream/downstream labels + matching tree-sitter code snippets + per-type required sections). `relativePathForNode(node)` returns `agents/<slug>/AGENT.md` or `skills/<slug>/SKILL.md`. |
 | `src/services/fileSystem.ts` | `pickProjectDirectory()`, `writeInstructionToDisk(dir, path, text)`, `readInstructionFromDisk(dir, path)`. Plus an in-memory + browser-download fallback for browsers without the FS Access API. |
 | `src/store/useFileSystemStore.ts` | Holds the current `ProjectDirectory` (handle + name) plus `isSupported` (detected at load) and `lastError`. Lives for the session only — directory handles are not serializable. |
 | `src/components/InstructionGeneratorDialog.tsx` | Modal: textarea for the user request → `Generate` calls the bridge → editable preview → `Save` writes the file (or downloads a fallback). Closes on save or via `×`/Escape/backdrop click. |
@@ -335,26 +354,27 @@ CLI. The browser cannot spawn processes, so a tiny Node bridge is required.
 
 1. User picks a project folder (only on Chromium-class browsers). The handle is kept in `useFileSystemStore`.
 2. User opens a node and clicks `Generate instruction`. The dialog opens with the node's existing instruction text (or the on-disk file content if `instructionFilePath` is set) preloaded.
-3. User types a request. `Generate` POSTs the assembled prompt to `/generate`, which `spawn`s `qwen -p <prompt>` and waits up to `QWEN_TIMEOUT_MS` for stdout.
+3. User types a request. `Generate` POSTs the assembled prompt to **same-origin** `/generate`, which `spawn`s `qwen -p <prompt>` and waits up to `QWEN_TIMEOUT_MS` for stdout.
 4. Result lands in the editable preview. The user can edit freely.
 5. `Save`:
    - If a project folder is picked → write to disk via `FileSystemAccess`, set `instructionFilePath`, and mirror the text into `node.config.instructions` (or `description` for skills).
    - Otherwise → trigger a browser download of `<fileName>.md`, remember the path in-memory, and mirror the text into the config field.
 
-### Adding more context later
+### Why one origin matters
 
-`buildPromptForNode` already accepts `upstreamSummary` and `downstreamSummary`
-strings. Today those are just the comma-joined labels of connected nodes. To
-plug in tree-sitter code-graph results later, extend
-`services/contextCollector.ts` (new file) to take the same arguments and
-return a richer prompt body — the dialog already passes the right inputs.
+CORS, mixed content, and `fetch` quirks all go away when the static UI and the
+JSON `/generate` endpoint share a scheme/host/port. The bridge responds to
+every browser call with `Access-Control-Allow-Origin: *` only for the
+hypothetical case where you proxy it onto a separate domain; in the default
+single-port setup it isn't required.
 
 ### Failure modes and UX
 
 | Symptom | What user sees |
 |---|---|
 | `qwen` not on PATH | Red error in the dialog: "could not spawn qwen: … Is Qwen installed?" Set `QWEN_COMMAND`. |
-| Bridge down | Red error: "Cannot reach qwen bridge at http://localhost:3001 …" |
+| Bridge down / wrong port | Red error: "Cannot reach the qwen bridge. Make sure the dev server or prod server is running and Qwen CLI is installed." |
+| Vite dev server missing the plugin | Generator dialog also fails with the same generic error — verify `vite.config.ts` is committed and a fresh `npm install` was run. |
 | Browser without FS Access | Folder picker hidden; Save button labelled "Save & download"; file is downloaded via the browser. |
 | Folder picked without write permission | Dialog surfaces "You did not grant write access. Re-pick the folder and allow modification." |
 
