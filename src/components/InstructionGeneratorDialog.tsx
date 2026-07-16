@@ -23,7 +23,6 @@ import {
   writeInstructionToDisk,
 } from '../services/fileSystem';
 import { QwenUnavailableError, generateViaQwen } from '../services/qwenClient';
-import { collectContextForNode } from '../services/treeSitter/contextCollector';
 
 interface InstructionGeneratorDialogProps {
   node: Node;
@@ -129,34 +128,39 @@ export default function InstructionGeneratorDialog({
   const codePhase = useCodeGraphStore((s) => s.phase);
   const codeStats = useMemo(() => describeGraph(codeGraph), [codeGraph]);
 
-  const codeContext = useMemo(() => {
-    if (!userRequest.trim()) return null; // only when user actually wants to generate
-    return collectContextForNode(appNode, codeGraph);
-  }, [appNode, codeGraph, userRequest]);
+  /** Currently-enriching entity progress (null when not enriching). */
+  const [enrichment, setEnrichment] = useState<
+    { current: number; total: number; entityName: string; phase: 'enriching' | 'generating' | 'idle' | 'done' }
+  >({ current: 0, total: 0, entityName: '', phase: 'idle' });
 
   const onGenerate = async () => {
     if (!userRequest.trim()) {
       setError('Please describe what you want the instruction to cover.');
       return;
     }
-    setStatus('generating');
+    setEnrichment({ current: 0, total: 0, entityName: '', phase: 'enriching' });
     setError(null);
     try {
-      const ctx = codeContext ?? collectContextForNode(appNode, codeGraph);
-      const prompt = buildPromptForNode(appNode, userRequest, {
+      const prompt = await buildPromptForNode(appNode, userRequest, {
         upstreamSummary: upstream.length ? upstream.join(', ') : undefined,
         downstreamSummary: downstream.length ? downstream.join(', ') : undefined,
-        codeContext: ctx.entityCount > 0 ? ctx.markdown : null,
+        codeGraph,
+        onEnrichmentProgress: (current, total, entityName) => {
+          setEnrichment({ current, total, entityName, phase: 'enriching' });
+        },
       });
+      setEnrichment((p) => ({ ...p, phase: 'generating' }));
       const text = await generateViaQwen(prompt);
       if (!text) {
         setError('Qwen returned an empty response.');
         setStatus('idle');
+        setEnrichment({ current: 0, total: 0, entityName: '', phase: 'idle' });
         return;
       }
       setDraft(text);
       setPreviewSource('generated');
       setStatus('idle');
+      setEnrichment({ current: 0, total: 0, entityName: '', phase: 'done' });
     } catch (err) {
       const msg = err instanceof QwenUnavailableError
         ? err.message
@@ -165,6 +169,7 @@ export default function InstructionGeneratorDialog({
         : String(err);
       setError(msg);
       setStatus('idle');
+      setEnrichment({ current: 0, total: 0, entityName: '', phase: 'idle' });
     }
   };
 
@@ -309,23 +314,26 @@ export default function InstructionGeneratorDialog({
           <div className="flex items-center justify-between p-3 bg-slate-800/40 border border-slate-700/50 rounded-xl">
             <div className="flex items-center gap-2 text-sm min-w-0">
               <Code2 className="w-4 h-4 text-slate-400 flex-shrink-0" />
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 {codeStats.totalEntities > 0 ? (
                   <>
                     <div className="text-slate-200">
                       {codeStats.totalEntities} code entities
-                      {codeContext && codeContext.entityCount > 0 && (
-                        <span className="ml-2 text-[11px] text-emerald-400">
-                          ({codeContext.entityCount} match this node)
+                      {enrichment.phase === 'enriching' && enrichment.total > 0 && (
+                        <span className="ml-2 text-[11px] text-indigo-300">
+                          · enriching {enrichment.current}/{enrichment.total}
+                          {enrichment.entityName ? ` · ${enrichment.entityName}` : ''}
                         </span>
                       )}
                     </div>
                     <div className="text-[11px] text-slate-500 truncate">
-                      {Object.entries(codeStats.byKind)
-                        .sort((a, b) => b[1] - a[1])
-                        .slice(0, 4)
-                        .map(([k, n]) => `${n} ${k}`)
-                        .join(' · ')}
+                      {enrichment.phase === 'enriching'
+                        ? `Semantic enrichment via Qwen (cache + ¹⁄ₙ live calls)…`
+                        : Object.entries(codeStats.byKind)
+                            .sort((a, b) => b[1] - a[1])
+                            .slice(0, 4)
+                            .map(([k, n]) => `${n} ${k}`)
+                            .join(' · ')}
                     </div>
                   </>
                 ) : codePhase === 'scanning' ? (
@@ -410,13 +418,18 @@ export default function InstructionGeneratorDialog({
             </button>
             <button
               onClick={onGenerate}
-              disabled={status !== 'idle'}
+              disabled={enrichment.phase === 'enriching' || enrichment.phase === 'generating'}
               className="flex items-center gap-2 px-4 py-2 text-sm bg-slate-800/50 hover:bg-slate-700/50 border border-slate-700/50 text-slate-300 rounded-xl transition-colors disabled:opacity-50"
             >
-              {status === 'generating' ? (
+              {enrichment.phase === 'enriching' ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  Generating…
+                  Анализирую {enrichment.current}/{enrichment.total || '…'}
+                </>
+              ) : enrichment.phase === 'generating' ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Генерирую…
                 </>
               ) : (
                 <>

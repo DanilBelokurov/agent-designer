@@ -10,6 +10,9 @@
 // output against the template's expected fields.
 
 import type { AppNode } from '../types';
+import type { CodeGraphSnapshot } from './treeSitter/codeGraphStore';
+import type { SemanticInfo } from './semanticCache';
+import { collectContextForNode } from './treeSitter/contextCollector';
 import agentTemplate from '../../templates/agent-template.md?raw';
 import skillTemplate from '../../templates/skill-template.md?raw';
 
@@ -195,18 +198,38 @@ export function validateAgentFrontmatter(parsed: FrontmatterValidation) {
 
 // ----------------- prompt builder -----------------
 
-interface BuildPromptOptions {
+interface BuildPromptInput {
   upstreamSummary?: string;
   downstreamSummary?: string;
-  /** Markdown produced by `collectContextForNode` — included verbatim under "Project Code Context". */
-  codeContext?: string | null;
+  /** Code-graph snapshot — when provided, the relevant entities are enriched via Qwen and rendered into the prompt. */
+  codeGraph?: CodeGraphSnapshot;
+  /**
+   * Skip the live enrichment step and reuse this Markdown verbatim under
+   * "Project Code Context". Useful for testing or when callers already
+   * have the block handy.
+   */
+  precomputedCodeContext?: string | null;
+  /** Forwarded to `collectContextForNode` — invoked after each entity's enrichment completes. */
+  onEnrichmentProgress?: (
+    current: number,
+    total: number,
+    entityName: string,
+    info: SemanticInfo,
+  ) => void;
+  /** Cap how many entities are sent to Qwen. Default 15. */
+  enrichPoolSize?: number;
 }
 
-export function buildPromptForNode(
+/**
+ * Assembles the full prompt for /generate. Optionally enriches the top
+ * matching code entities through Qwen before inserting them under
+ * `## Project Code Context` (always via cache first).
+ */
+export async function buildPromptForNode(
   node: AppNode,
   userRequest: string,
-  options: BuildPromptOptions = {},
-): string {
+  input: BuildPromptInput = {},
+): Promise<string> {
   const lines: string[] = [];
 
   lines.push(
@@ -230,19 +253,35 @@ export function buildPromptForNode(
   lines.push('');
 
   // ----- Context blocks -----
-  if (options.upstreamSummary) {
-    lines.push('## Upstream (delegates into this node)', options.upstreamSummary, '');
+  if (input.upstreamSummary) {
+    lines.push('## Upstream (delegates into this node)', input.upstreamSummary, '');
   }
-  if (options.downstreamSummary) {
-    lines.push('## Downstream (this node attaches to)', options.downstreamSummary, '');
+  if (input.downstreamSummary) {
+    lines.push('## Downstream (this node attaches to)', input.downstreamSummary, '');
   }
-  if (options.codeContext && options.codeContext.trim()) {
+
+  // ----- Code context (either precomputed or freshly enriched) -----
+  let codeContextMarkdown: string | null = null;
+
+  if (input.precomputedCodeContext !== undefined) {
+    // Caller explicitly opted out of live enrichment.
+    codeContextMarkdown = input.precomputedCodeContext ?? null;
+  } else if (input.codeGraph && Object.keys(input.codeGraph.entitiesById).length > 0) {
+    const collected = await collectContextForNode(node, input.codeGraph, {
+      enrichPoolSize: input.enrichPoolSize,
+      onProgress: input.onEnrichmentProgress,
+    });
+    codeContextMarkdown = collected.entityCount > 0 ? collected.markdown : null;
+  }
+
+  if (codeContextMarkdown && codeContextMarkdown.trim()) {
     lines.push(
       '## Project Code Context',
       'Real code extracted from the project folder by a tree-sitter scan. ' +
+        'Each entity is annotated by a local Qwen call with role + short description. ' +
         'Treat signatures, doc comments, and bodies as ground truth for naming, parameter shapes, behaviour, and edge cases.',
       '',
-      options.codeContext.trim(),
+      codeContextMarkdown.trim(),
       '',
     );
   }

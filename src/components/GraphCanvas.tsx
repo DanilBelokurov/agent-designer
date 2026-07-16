@@ -22,6 +22,7 @@ import CodeGraphToolbarButton from './CodeGraphToolbarButton';
 import type { NodeType } from '../types';
 import { autoLayout } from '../utils/autoLayout';
 import { hydrateCodeGraphStore } from '../store/useCodeGraphStore';
+import { semanticCache } from '../services/semanticCache';
 
 const nodeTypes = {
   orchestrator: OrchestratorNode,
@@ -47,6 +48,7 @@ const GraphCanvas = () => {
 
   useEffect(() => {
     void hydrateCodeGraphStore();
+    void semanticCache.loadFromDB();
   }, []);
 
   const onDragStart = useCallback(

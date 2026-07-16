@@ -10,6 +10,7 @@ import { useCodeGraphStore, describeGraph, findMatchingEntities } from '../store
 import { scanProjectDirectory } from '../services/treeSitter/folderScanner';
 import { pickProjectDirectory } from '../services/fileSystem';
 import { mergeParseResult } from '../services/treeSitter/codeGraphStore';
+import { semanticCache } from '../services/semanticCache';
 
 export default function CodeGraphToolbarButton() {
   const directory = useFileSystemStore((s) => s.directory);
@@ -159,7 +160,10 @@ export default function CodeGraphToolbarButton() {
               </button>
               <button
                 type="button"
-                onClick={reset}
+                onClick={() => {
+                  void semanticCache.clear();
+                  reset();
+                }}
                 disabled={stats.totalEntities === 0}
                 className="px-3 py-2 rounded-xl border border-slate-700/50 bg-slate-800/40 text-slate-300 hover:text-white text-sm disabled:opacity-40"
               >

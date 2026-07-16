@@ -710,9 +710,97 @@ Show concrete examples of using this Skill.
 
 ---
 
-## 12. Build & dev
+### 11.10 Семантическое обогащение графа кода через Qwen
 
-Single-port rule: React-приложение и qwen-bridge делят один origin — `5173` в dev, `3001` в prod. Клиент ходит на relative `/generate`.
+Поверх tree-sitter scanner'а лежит слой семантики: Qwen получает сигнатуру + тело каждой сущности, попавшей в контекст, и возвращает короткое описание роли (`controller`/`service`/`repository`/…) плюс one-line summary. Результат кешируется и подставляется в `## Project Code Context` под каждой сущностью, чтобы основной вызов `/generate` получал уже размеченную выжимку вместо сырых сигнатур.
+
+#### Архитектура
+
+```
+        InstructionGeneratorDialog
+        ↓ click "Generate"
+        buildPromptForNode (async)
+        ↓
+        collectContextForNode (async)
+        ├─ candidates ─ top N matches by name ─┐
+        ↓                                      │
+        enrichEntities(entities, onProgress)   │
+        │  for each entity (sequential):        │
+        │   enrichEntity(entity)                │
+        │     ├─ semanticCache.get (IDB-first)  │
+        │     ├─ cache miss → qwen -p prompt    │
+        │     ├─ parse РОЛЬ / ОПИСАНИЕ lines     │
+        │     └─ semanticCache.set (write-through)
+        ├─ re-rank by role-bonus                 │
+        └─ render Markdown                       │
+        ↓
+        POST /generate  (single, with enriched Markdown)
+        ↓
+        write SKILL.md / AGENT.md + updateNode
+```
+
+#### Файлы
+
+| Файл | Роль |
+|---|---|
+| `src/services/semanticCache.ts` | Кеш `entityId → {role, description, timestamp}`: in-memory `Map` + IDB (через `idb-keyval`, store `'agent-designer-semantic-cache'`). API: `getSync`, `setSync`, `loadFromDB`, `persistToDB`, `get`, `set`, `clear`, `size`. |
+| `src/services/semanticEnricher.ts` | `enrichEntity(entity)` → `SemanticInfo`. Кеш → Qwen → парсер → кеш. `enrichEntities(entities, onProgress)` — последовательно, репортит прогресс. Fallback: `{ role: 'unknown', description: 'Не удалось определить' }` при любой ошибке. |
+| `src/services/treeSitter/contextCollector.ts` | (обновлено) — `collectContextForNode` теперь async, принимает `onProgress`. Делит candidate'ов на `enrichPoolSize` (default 15), просит обогащение, ре-ранкирует по признанной роли и рендерит Markdown с `**Role:**` + `**Summary:**` блоками. |
+| `src/services/instructionGenerator.ts` | `buildPromptForNode` стал async. Принимает `codeGraph` + `onEnrichmentProgress` в input. Если `codeGraph` пуст — context блок пропускается. Если передан `precomputedCodeContext` — используется verbatim (полезно для тестов). |
+| `src/components/InstructionGeneratorDialog.tsx` | Новый state `enrichment { current, total, entityName, phase }`. Кнопка показывает `Анализирую N/M · <entity>` во время enrichment и `Генерирую…` во время основного вызова. |
+| `src/components/CodeGraphToolbarButton.tsx` | Clear-button теперь также зовёт `semanticCache.clear()` чтобы не использовать кэш на новом проекте. |
+| `src/components/GraphCanvas.tsx` | `useEffect` дополнительно вызывает `semanticCache.loadFromDB()` при старте. |
+
+#### Step-by-step
+
+1. **Гидрация при старте** (`GraphCanvas`): вызов `semanticCache.loadFromDB()` подтягивает все IDB-записи в `Map` (memory-first).
+2. **Клик Generate**: dialog ставит `enrichment.phase = 'enriching'` и зовёт `buildPromptForNode(node, userRequest, { codeGraph, onEnrichmentProgress })`.
+3. **`buildPromptForNode`**: проверяет `codeGraph.entitiesById`. Если пуст — context блок пропускается; иначе зовёт `collectContextForNode`.
+4. **`collectContextForNode`**:
+   - Строит `candidates` из `safeSlug(label)` + `functionName` (skill) / первых токенов `instructions` (agent).
+   - Скорит все entities по совпадению имени (exact=10, substring=4, штраф за accessor'ы).
+   - Top-`enrichPoolSize` (default 15) сущностей отдаются `enrichEntities`.
+   - После enrichment — re-rank: узнанная роль (`≠ 'unknown'`) даёт +5, непустое описание даёт +1.
+   - Top-10 попадают в рендер.
+5. **`enrichEntities` → `enrichEntity`** для каждой сущности:
+   - `semanticCache.get(entityId)` — id, синхронно in-memory, иначе IDB, hydrate memory по попаданию.
+   - Hit → возврат, без сетевого вызова.
+   - Miss → `qwenClient.generateViaQwen(buildEnrichmentPrompt(entity))`.
+   - Промпт включает `name`, `kind`, `signature`, обрезанное до 2000 символов `bodySnippet`, `docComment`. В конце требуемый формат ответа: `РОЛЬ: <word>` + `ОПИСАНИЕ: <sentence>`.
+   - Парсер ловит обе строки регэкспом `^\s*РОЛЬ\s*:\s*(.+?)\s*$` / `^\s*ОПИСАНИЕ\s*:\s*(.+?)\s*$` (case-insensitive).
+   - Роль нормализуется через whitelist (`controller`, `service`, `repository`, `factory`, `adapter`, `configuration`, `entity`, `dto`, `mapper`, `handler`, `validator`, `utility`, `middleware`, `guard`, `filter`, `resolver`, `provider`, `helper`, `composable`, `hook`, `unknown`) — всё остальное падает в `unknown`.
+   - Описание клипается до 100 символов.
+   - Любая ошибка → fallback `SemanticInfo { role: 'unknown', description: <message> }`.
+6. **`semanticCache.set(info)`** пишет в memory + IDB (через `idb-keyval.get/set`).
+7. **`buildPromptForNode`** получает готовый Markdown и вставляет под `## Project Code Context`.
+8. Dialog переходит в `phase = 'generating'`, делает `generateViaQwen(prompt)` (как раньше).
+9. Ответ приходит → standard flow (template alignment, save).
+
+#### Когда `cache` не помогает
+
+- **Qwen CLI недоступен** — fallback `{ role: 'unknown', description: 'Cannot reach the qwen bridge…' }`. UI продолжает работать; промпт содержит entity без `Role:` / `Summary:` строк.
+- **`enrichPoolSize = 0`** или `skipEnrich: true` — сущности пройдут с приглушённым placeholder'ом.
+- **Парсер не вытащил `ОПИСАНИЕ`** — description становится `'Не удалось распарсить ответ Qwen'`, role — как обычно.
+- **Нет entities в pool** (мало матчей по имени) — context блок опускается целиком.
+
+#### Failure modes
+
+| Симптом | Поведение |
+|---|---|
+| Qwen упал в середине enrichment | Loops incomplete, возвращаются fallback'и, генерация всё равно продолжается |
+| Браузер без IDB | `idb-keyval` генерирует exception → ловится в `semanticCache`, in-memory-only |
+| Кеш устарел после Clear | `semanticCache.clear()` стирает и IDB, и memory |
+| Одну и ту же сущность попросили разные ноды | Один enrichment-кэш на entityId, всё ОК |
+
+#### Метрики
+
+- Типичный сценарий: 5–15 матчей → большая часть из кеша после первого скана.
+- Холодный старт: ≈ N × 1–3 s для N свежих сущностей (sequential CLI).
+- IDB cache hit-ratio: после первого дня использования стремится к 100%.
+
+---
+
+## 12. Build & dev
 
 ```sh
 npm install

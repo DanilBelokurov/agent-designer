@@ -42,6 +42,10 @@ export interface CodeEntity {
   parentId?: string;
   /** Source language. */
   language?: string;
+  /** Qwen-derived role label (e.g. `controller`, `service`, `repository`). Set by the semantic enricher. */
+  semanticRole?: string;
+  /** Qwen-derived short description (≤100 chars). Set by the semantic enricher. */
+  semanticDescription?: string;
 }
 
 export interface CodeRelation {
