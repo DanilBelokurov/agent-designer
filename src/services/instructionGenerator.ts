@@ -11,6 +11,7 @@
 
 import type { AppNode } from '../types';
 import type { CodeGraphSnapshot } from './treeSitter/codeGraphStore';
+import type { CodeEntity } from './treeSitter/codeGraph';
 import type { SemanticInfo } from './semanticCache';
 import { collectContextForNode } from './treeSitter/contextCollector';
 import agentTemplate from '../../templates/agent-template.md?raw';
@@ -260,41 +261,66 @@ export async function buildPromptForNode(
     lines.push('## Downstream (this node attaches to)', input.downstreamSummary, '');
   }
 
-  // ----- Code context (either precomputed or freshly enriched) -----
+  // ----- User request -----
+  lines.push('## User Request', userRequest.trim(), '');
+
+  // ----- Template (so Qwen sees the exact schema, including `## Examples`). -----
+  lines.push('## Template (output MUST match this structure)');
+  lines.push('```markdown');
+  if (node.type === 'skill') lines.push(skillTemplate);
+  else lines.push(agentTemplate);
+  lines.push('```', '');
+
+  // ----- Code context (placed right before Required Body so Qwen reads
+  //       the snippets last and can ground `## Examples` in them). -----
   let codeContextMarkdown: string | null = null;
+  let collectedEntityCount = 0;
+  let collectedEntities: CodeEntity[] = [];
 
   if (input.precomputedCodeContext !== undefined) {
-    // Caller explicitly opted out of live enrichment.
     codeContextMarkdown = input.precomputedCodeContext ?? null;
   } else if (input.codeGraph && Object.keys(input.codeGraph.entitiesById).length > 0) {
     const collected = await collectContextForNode(node, input.codeGraph, {
       enrichPoolSize: input.enrichPoolSize,
       onProgress: input.onEnrichmentProgress,
     });
+    collectedEntityCount = collected.entityCount;
+    collectedEntities = collected.entities;
     codeContextMarkdown = collected.entityCount > 0 ? collected.markdown : null;
   }
+
+  // Pick a "primary anchor" entity whose name matches what the user
+  // thinks they're describing — skill's functionName first, otherwise
+  // the slugified label.
+  const anchorName = collectAnchorName(node);
+  const anchorEntity =
+    collectedEntities.find(
+      (e) => e.name === anchorName || e.name.toLowerCase() === anchorName.toLowerCase(),
+    ) ?? null;
 
   if (codeContextMarkdown && codeContextMarkdown.trim()) {
     lines.push(
       '## Project Code Context',
-      'Real code extracted from the project folder by a tree-sitter scan. ' +
-        'Each entity is annotated by a local Qwen call with role + short description. ' +
-        'Treat signatures, doc comments, and bodies as ground truth for naming, parameter shapes, behaviour, and edge cases.',
-      '',
-      codeContextMarkdown.trim(),
+      'Real code extracted from the project folder by a tree-sitter scan, ' +
+        'annotated by Qwen with role + short description. Treat signatures, doc comments, ' +
+        'and bodies as ground truth for naming, parameter shapes, behaviour, and edge cases.',
       '',
     );
+    if (anchorEntity) {
+      lines.push(
+        `**PRIMARY ANCHOR:** \`${anchorEntity.name}\` — at \`${anchorEntity.filePath}\`, line ${anchorEntity.startLine + 1}. ` +
+          'Anchor your `## Examples` on the body shown for this entity.',
+        '',
+      );
+    } else if (collectedEntityCount > 0) {
+      lines.push(
+        `No exact match for the anchor name "${anchorName}" was found in the code graph. ` +
+          'The snippets below are the closest matches by name; use them as the source of `## Examples` regardless.',
+        '',
+      );
+    }
+    lines.push(codeContextMarkdown.trim(), '');
   }
-
-  // ----- User request -----
-  lines.push('## User Request', userRequest.trim(), '');
-
-  // ----- Template + per-type rules -----
-  lines.push('## Template (output MUST match this structure)');
-  lines.push('```markdown');
-  if (node.type === 'skill') lines.push(skillTemplate);
-  else lines.push(agentTemplate);
-  lines.push('```', '');
 
   if (node.type === 'skill') {
     lines.push(
@@ -305,8 +331,16 @@ export async function buildPromptForNode(
       '',
       '## Skill — Required Body Sections',
       '- `# <title>` matching the label in human-readable form.',
-      '- `## Instructions` — clear, step-by-step guidance.',
-      '- `## Examples` — concrete usage examples.',
+      '- `## Instructions` — clear, step-by-step guidance. Pull behaviour, naming, and ' +
+        'parameter shape from the `## Project Code Context` block above.',
+      '- `## Examples` — **REQUIRED**. Every example MUST be a runnable snippet (input → output, ' +
+        'or call → response) and MUST use the EXACT symbols (function / class / method names, ' +
+        'parameter names, return shapes) you saw in `## Project Code Context`. Do not invent APIs. ' +
+        (anchorEntity
+          ? 'Anchor on `' + anchorEntity.name + '` — you have its full body in the context. '
+          : '') +
+        'Provide 2-4 examples that cover happy-path + at least one edge case. ' +
+        'Show enough surrounding code that a reader can run the snippet without guessing.',
       '',
     );
   } else {
@@ -339,4 +373,16 @@ export async function buildPromptForNode(
 export function summarizeLabel(label: string, fallback: string): string {
   if (!label || label === fallback) return fallback;
   return `${label} (${fallback})`;
+}
+
+/**
+ * Pick the name we expect Qwen to anchor `## Examples` on: skill's
+ * `functionName` if set, otherwise the slugified node label.
+ */
+function collectAnchorName(node: AppNode): string {
+  if (node.type === 'skill') {
+    const cfg = node.config as { functionName?: string };
+    if (cfg.functionName) return cfg.functionName;
+  }
+  return safeSlug(node.label);
 }
