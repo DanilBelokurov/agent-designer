@@ -9,7 +9,10 @@ import { describeGraph } from '../store/useCodeGraphStore';
 import type { AppNode, NodeConfig } from '../types';
 import {
   buildPromptForNode,
+  parseMarkdownFrontmatter,
   relativePathForNode,
+  validateAgentFrontmatter,
+  validateSkillFrontmatter,
 } from '../services/instructionGenerator';
 import {
   downloadAsFile,
@@ -387,6 +390,7 @@ export default function InstructionGeneratorDialog({
               placeholder="Click Generate to fill this with a draft from Qwen, or type your own instructions here."
               className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition-all resize-none backdrop-blur-sm font-mono text-sm"
             />
+            <ValidationChip draft={draft} nodeType={nodeType} />
           </div>
         </div>
 
@@ -446,6 +450,56 @@ export default function InstructionGeneratorDialog({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ----------------- validation chip -----------------
+
+function ValidationChip({
+  draft,
+  nodeType,
+}: {
+  draft: string;
+  nodeType: 'orchestrator' | 'sub_agent' | 'skill';
+}) {
+  if (!draft.trim()) {
+    return (
+      <div className="text-[11px] text-slate-500 italic">
+        Output will be validated against the {nodeType === 'skill' ? 'skill' : 'agent'} template once generated.
+      </div>
+    );
+  }
+
+  const parsed = parseMarkdownFrontmatter(draft);
+  const validated =
+    nodeType === 'skill' ? validateSkillFrontmatter(parsed) : validateAgentFrontmatter(parsed);
+  const schemaOk = validated.missingRequired.length === 0 && validated.errors.length === 0;
+
+  const summary: string[] = [];
+  if (validated.missingRequired.length) {
+    summary.push(`missing ${validated.missingRequired.join(', ')}`);
+  }
+  if (validated.errors.length) {
+    summary.push(validated.errors[0]);
+  }
+
+  return (
+    <div
+      className={`flex items-start gap-2 px-2.5 py-1.5 rounded-lg text-[11px] ${
+        schemaOk
+          ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
+          : 'bg-amber-500/10 border border-amber-500/30 text-amber-300'
+      }`}
+    >
+      <span className="font-mono text-[10px] mt-0.5">
+        {schemaOk ? '✓ template' : '⚠ template'}
+      </span>
+      <span className="flex-1 break-words">
+        {schemaOk
+          ? `Matches the ${nodeType === 'skill' ? 'skill-template.md' : 'agent-template.md'} structure.`
+          : summary.join(' · ')}
+      </span>
     </div>
   );
 }
