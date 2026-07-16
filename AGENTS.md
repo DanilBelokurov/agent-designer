@@ -1,479 +1,827 @@
 # Agent Designer — AGENTS.md
 
-A guide for AI agents working on this codebase. Describes what the app does, how it is structured, and where to make common changes.
+Краткий гид для AI-агентов, работающих с этим репо. Описывает, что делает приложение, как устроен код и где делать типовые изменения. Каждый реализованный функционал документирован пошагово.
 
 ---
 
-## 1. What this app is
+## 1. Что это такое
 
-**Agent Designer** is a single-page web app for visually designing a graph of AI agents:
+**Agent Designer** — single-page web-приложение для визуального проектирования графа AI-агентов.
 
-- **Nodes** represent three kinds of things — *Orchestrator*, *Sub-Agent* (dispatchable worker), and *Skill* (tool/function).
-- **Directed edges** express two relationships: `delegation` (orchestrator → sub-agent, or orchestrator → skill), and `skill_attachment` (sub-agent → skill).
-- The user drags components from the left palette onto a React Flow canvas, wires them with directed handles, edits properties in the right panel, then either exports the project as JSON or generates Python `dataclass` code.
+- **Ноды** представляют три типа сущностей: *Orchestrator*, *Sub-Agent* (диспатчируемый воркер), *Skill* (инструмент/функция).
+- **Направленные рёбра** выражают два отношения: `delegation` (orchestrator → sub-agent, или orchestrator → skill) и `skill_attachment` (sub-agent → skill).
+- Пользователь перетаскивает компоненты из левой палитры на React Flow canvas, соединяет их ручками (handles), редактирует свойства в правой панели, затем либо экспортирует проект как JSON, либо генерирует Python `dataclass`-скелет.
 
-The app is purely client-side; there is no backend.
+Приложение поддерживает также:
+- генерацию Markdown-инструкции для любой ноды через локальный Qwen CLI с привязкой к шаблонам;
+- сканирование выбранной папки проекта через tree-sitter (WASM) для построения графа кода, чтобы LLM писал инструкции по реальным сигнатурам, а не на глаз.
+
+Приложение полностью клиентское; единственная server-сторона — лёгкий Node-bridge для `spawn('qwen', …)`, раздаваемый на том же origin'е (порт `5173` в dev, `3001` в prod).
 
 ---
 
-## 2. Tech stack
+## 2. Архитектура одним взглядом
 
-| Layer | Choice | Notes |
+```
+┌──────────────────────────── Browser ────────────────────────────┐
+│                                                                  │
+│   React UI (Vite dev :5173  /  prod :3001)                      │
+│   ┌─────────┐  ┌──────────┐  ┌────────────┐  ┌───────────────┐    │
+│   │Toolbar  │  │NodePalette│  │ <ReactFlow>│  │PropertiesPanel│   │
+│   └────┬────┘  │ (left)    │  │ + MiniMap  │  │ (right, только│   │
+│        │       └─────┬────┘  │ + Controls │  │  при выборе)  │   │
+│        │             │        └────────────┘  └───────────────┘    │
+│        │             │ drag-drop      ↑            ↑ onSelect    │
+│        │             ↓                               ↓           │
+│        │       screenToFlowPosition            updateNode        │
+│        │       addNode(type, pos)                                │
+│        ↓                                                          │
+│   fetch('/generate', POST {prompt})                              │
+│   fetch('/grammars/*.wasm')                                      │
+│   (same origin → no CORS)                                        │
+│                                                                  │
+│   Zustand stores:                                                │
+│     useGraphStore (nodes, edges, selection)                     │
+│     useFileSystemStore (picked folder)                           │
+│     useCodeGraphStore (entities, relations, scan phase)          │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌──────────────────────── Same-origin Node ────────────────────────┐
+│   server/qwenHandler.mjs  (shared, ES module)                    │
+│     handleGenerate → spawn('qwen', ['-p', prompt])              │
+│     handleHealth   → { ok, qwen, timeoutMs }                    │
+│                                                                  │
+│   Mounted by:                                                    │
+│     • vite.config.ts (configureServer/Preview) in dev          │
+│     • server/prod-server.mjs in prod                            │
+│                                                                  │
+│   Static serving + SPA fallback: prod-server.mjs reads dist/    │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**Один порт, одно приложение.** Лоадер грамматик `web-tree-sitter` тянет `/grammars/*.wasm` (Vite dev отдаёт из `public/`, prod-server.mjs отдаёт из `dist/`, тот же origin).
+
+---
+
+## 3. Стек
+
+| Слой | Выбор | Заметки |
 |---|---|---|
-| Build | Vite 8 | `npm run dev` / `npm run build` |
+| Bundler | Vite 8 | `npm run dev` / `npm run build` |
 | UI runtime | React 19 | strict via `tsconfig.app.json` |
-| Language | TypeScript | `verbatimModuleSyntax: true` — every type-only import must use `import type` |
+| Language | TypeScript | `verbatimModuleSyntax: true` — type-only импорты через `import type { … }` |
 | Graph canvas | `reactflow` 11 | custom node types, custom controls, validated connections |
-| State | `zustand` 5 | one graph store + one FS store; React Flow's local change events are forwarded into the graph store |
-| Icons | `lucide-react` 1.x | used in nodes, panels, toolbar, controls |
-| Styling | Tailwind CSS 3 + PostCSS | glassmorphism via `src/index.css` `@layer components` |
-| Bridge server | Node `http` built-in | `server/qwenHandler.mjs` (shared), `server/prod-server.mjs` (prod), Vite middleware in `vite.config.ts` (dev) — no extra deps; `npm run dev` (5173) and `npm run server` (3001) |
+| State | `zustand` 5 | 3 независимых стора: `useGraphStore`, `useFileSystemStore`, `useCodeGraphStore` |
+| Icons | `lucide-react` 1.x | всё UI (ноды, панели, toolbar, controls) |
+| Styling | Tailwind 3 + PostCSS | glassmorphism в `src/index.css` `@layer components` |
+| Filesystem access | File System Access API | хранилище для записи инструкций; fallback на browser download |
+| Code parsing | `web-tree-sitter` 0.26 | WASM-грамматики в `public/grammars/`; regex-фолбэк |
+| Qwen bridge | Node `http` built-in | `server/qwenHandler.mjs` — без внешних deps |
 | Lint | `oxlint` (`npm run lint`) | |
-| Entry | `src/main.tsx` → `src/App.tsx` (wraps `<GraphCanvas>` in `<ReactFlowProvider>`) | |
+| Entry | `src/main.tsx` → `src/App.tsx` (внутри `<ReactFlowProvider>`) | |
 
 ---
 
-## 3. Repository layout
+## 4. Структура репозитория
 
 ```
 agent-graph-designer/
-├── index.html                        # Google Fonts (Inter) + root div
-├── package.json                      # scripts: dev, build, lint, preview, server
-├── vite.config.ts                    # vite + @vitejs/plugin-react
-├── tsconfig.json / .app / .node      # strict TS, verbatimModuleSyntax
-├── tailwind.config.js
-├── postcss.config.js
-├── .oxlintrc.json
-├── base-config.json                  # pre-built sample project (213 nodes)
+├── index.html                          # Google Fonts (Inter) + #root
+├── package.json                        # scripts: dev, build, lint, preview, server, prod, grammars
+├── vite.config.ts                      # vite + @vitejs/plugin-react + qwenBridge() middleware
+├── tsconfig.json / .app / .node        # strict TS, verbatimModuleSyntax
+├── tailwind.config.js, postcss.config.js, .oxlintrc.json
+├── base-config.json                    # пример проекта (213 nodes: 8 орч. + 41 агент + 164 скила)
+├── README.md
+├── AGENTS.md
 ├── public/
-│   └── grammars/                     # tree-sitter WASM (runtime + per-language grammars)
+│   ├── favicon.svg, icons.svg
+│   └── grammars/                       # WASM, вендоренные через scripts/fetch-grammars.cjs
+│       ├── web-tree-sitter.wasm        # runtime
+│       ├── tree-sitter-typescript.wasm
+│       ├── tree-sitter-javascript.wasm
+│       └── tree-sitter-python.wasm
 ├── scripts/
-│   ├── generate-base-config.cjs      # Node script that builds base-config.json
-│   └── fetch-grammars.cjs            # vendor tree-sitter WASM into public/grammars/
+│   ├── generate-base-config.cjs        # Node-скрипт, регенерирует base-config.json
+│   └── fetch-grammars.cjs              # скачивает WASM-грамматики в public/grammars/
 ├── server/
-│   ├── qwenHandler.mjs               # shared request handler for /generate and /health
-│   └── prod-server.mjs               # single-port prod entrypoint: dist/ + /generate on PORT
+│   ├── qwenHandler.mjs                 # shared handler: /generate, /health, dispatchBridge
+│   └── prod-server.mjs                 # production: один Node-процесс на dist/ + /generate + /health
+├── templates/
+│   ├── agent-template.md               # reference для /generate: name, description, model, …
+│   └── skill-template.md               # reference для /generate: name, description, priority
 ├── src/
-│   ├── main.tsx                      # ReactDOM.createRoot
-│   ├── App.tsx                       # ReactFlowProvider + GraphCanvas
-│   ├── index.css                     # Tailwind + React Flow overrides + glass styles
-│   ├── types/
-│   │   └── index.ts                  # NodeType, NodeConfig (incl. instructionFilePath), AppNode, AppEdge, Project
+│   ├── main.tsx, App.tsx, index.css
+│   ├── types/index.ts                  # NodeType, *Config, AppNode, AppEdge, Project
 │   ├── store/
-│   │   ├── useGraphStore.ts          # graph state (nodes, edges, selection)
-│   │   ├── useFileSystemStore.ts     # picked project folder + error state
-│   │   └── useCodeGraphStore.ts      # code-graph snapshot + scan progress
+│   │   ├── useGraphStore.ts            # nodes / edges / selection / projectName
+│   │   ├── useFileSystemStore.ts       # picked project directory + lastError
+│   │   └── useCodeGraphStore.ts        # code-graph snapshot, scan progress, persist в IDB
 │   ├── services/
-│   │   ├── qwenClient.ts             # fetch wrapper around the bridge /generate
-│   │   ├── fileSystem.ts             # FS Access API + download fallback
-│   │   ├── instructionGenerator.ts   # prompt assembly + per-node path derivation
+│   │   ├── qwenClient.ts               # fetch wrapper /generate (relative URL)
+│   │   ├── fileSystem.ts               # FS Access API + browser-download fallback
+│   │   ├── instructionGenerator.ts     # prompt builder + relativePathForNode + frontmatter parser/validator
 │   │   └── treeSitter/
-│   │       ├── loader.ts             # WASM runtime + grammar fetch/IDB cache
-│   │       ├── codeGraph.ts          # CodeEntity/CodeRelation/ParseResult types
-│   │       ├── codeGraphStore.ts     # in-memory graph mutation helpers
-│   │       ├── tsExtractor.ts        # tree-sitter AST walker (TS/JS/Python)
-│   │       ├── regexExtractor.ts     # regex-based fallback parser
-│   │       ├── codeParserSelector.ts # tries tree-sitter, falls back to regex
-│   │       ├── folderScanner.ts      # walks the picked FS handle into the graph
-│   │       └── contextCollector.ts   # pick + format relevant entities for a node
-│   ├── utils/
-│   │   └── autoLayout.ts             # hierarchical top-down layout algorithm
+│   │       ├── loader.ts               # WASM runtime init + grammar fetch/IDB-cache
+│   │       ├── codeGraph.ts            # CodeEntity/CodeRelation/ParseResult (доменные типы)
+│   │       ├── codeGraphStore.ts       # in-memory graph: mergeParseResult, clearGraph, queries
+│   │       ├── tsExtractor.ts          # AST walker: TS/JS/Python, вытаскивает entities
+│   │       ├── regexExtractor.ts       # fallback parser (regex-based, без wasm)
+│   │       ├── codeParserSelector.ts   # runParserForFile: tree-sitter → regex
+│   │       ├── folderScanner.ts        # walks picked FileSystemDirectoryHandle → graph
+│   │       └── contextCollector.ts     # top-N match node→entities, рендерит Markdown
+│   ├── utils/autoLayout.ts             # иерархическая top-down раскладка
 │   └── components/
-│       ├── GraphCanvas.tsx           # top-level layout, hosts ReactFlow
-│       ├── Toolbar.tsx               # top bar (project name, import/export, codegen)
-│       ├── InstructionGeneratorDialog.tsx # modal invoked from PropertiesPanel
-│       ├── CodeGraphToolbarButton.tsx # floating panel for triggering code-graph scans
+│       ├── GraphCanvas.tsx             # top-level shell, держит React Flow + панели
+│       ├── Toolbar.tsx                 # top bar: project name, импорт/экспорт, codegen
+│       ├── InstructionGeneratorDialog.tsx # модалка генерации инструкции
+│       ├── CodeGraphToolbarButton.tsx  # floating панель сканирования кода
 │       ├── nodes/
-│       │   ├── index.ts              # re-exports the three node components
-│       │   ├── OrchestratorNode.tsx  # indigo gradient, target handle top, source bottom
-│       │   ├── SubAgentNode.tsx      # blue gradient, target top, source bottom
-│       │   └── SkillNode.tsx         # emerald gradient, target top, source bottom
+│       │   ├── OrchestratorNode.tsx    # indigo, target top, source bottom
+│       │   ├── SubAgentNode.tsx        # blue, target top, source bottom
+│       │   └── SkillNode.tsx           # emerald, target top, source bottom
 │       └── panels/
-│           ├── NodePalette.tsx       # left: collapsible draggable item list
-│           └── PropertiesPanel.tsx   # right: shown only when a node is selected
-└── README.md
+│           ├── NodePalette.tsx         # left: collapse-иконка + draggable cards
+│           └── PropertiesPanel.tsx     # right: per-type form + Connections + Delete
 ```
 
 ---
 
-## 4. Data model (`src/types/index.ts`)
+## 5. Модель данных (`src/types/index.ts`)
 
 ```ts
-type NodeType = 'orchestrator' | 'sub_agent' | 'skill';
+NodeType = 'orchestrator' | 'sub_agent' | 'skill'
 
-// Config discriminated by type:
-OrchestratorConfig = { instructions?: string; maxDelegations?: number }
-SubAgentConfig     = { instructions?: string; tools?: string[] }
-SkillConfig        = { functionName: string; description: string; parameters?: Record<string, unknown> }
+OrchestratorConfig = { instructions?: string; maxDelegations?: number; instructionFilePath?: string }
+SubAgentConfig      = { instructions?: string; tools?: string[]; instructionFilePath?: string }
+SkillConfig         = { functionName: string; description: string; parameters?: Record<string,unknown>; instructionFilePath?: string }
 
-BaseNode = { id, type: NodeType, label: string, config: NodeConfig }
-AppNode  = OrchestratorNode | SubAgentNode | SkillNode      // discriminated by `type`
-AppEdge  = { id, source: string, target: string, edgeType: 'delegation' | 'skill_attachment' }
+BaseNode = { id, type: NodeType, label, config: NodeConfig }
+AppNode  = OrchestratorNode | SubAgentNode | SkillNode      // discriminated по type
+AppEdge  = { id, source, target, edgeType: 'delegation' | 'skill_attachment' }
 
 Project = { id, name, nodes: AppNode[], edges: AppEdge[], createdAt, updatedAt }
 ```
 
-The format used by `exportProject` / `importProject` is exactly `Project` (without the type-only wrappers) — see `base-config.json` for a worked example.
+Две разные формы:
+- **Project form** — то, что попадает в `base-config.json`, `exportProject()`, `importProject()`. Сериализуется как JSON и передаётся через clipboard/filesystem.
+- **Wire form** — что внутри Zustand-стора и React Flow. У ноды `{ id, type, position, data: { label, config } }`, у ребра `{ id, source, target, type:'smoothstep', animated, style:{stroke}, data:{edgeType} }`.
 
-The Wire format used inside the running app (the Zustand store) uses **React Flow shapes** (`{ id, type, position, data: { label, config } }`), not the `AppNode` shape. The conversion happens in `exportProject` / `importProject` in `useGraphStore.ts`.
+Конверсия между ними — в `useGraphStore.ts` (`exportProject`/`importProject`). Позиции при импорте рандомизируются (`{ x: Math.random()*400, y: Math.random()*400 }`) — это нормально, т.к. пользователь обычно сразу жмёт Auto-layout.
 
 ---
 
-## 5. State management (`src/store/useGraphStore.ts`)
+## 6. State management — `useGraphStore`
 
-Single Zustand store: `useGraphStore`. The store holds:
+Zustand-стор (`src/store/useGraphStore.ts`) с четырьмя полями:
 
-| Field | Type | Notes |
+| Поле | Тип | Заметки |
 |---|---|---|
-| `nodes` | `Node[]` | React Flow shape; `position` is mutated freely |
-| `edges` | `Edge[]` | React Flow shape; `data.edgeType` carries `delegation` / `skill_attachment` |
-| `selectedNodeId` | `string \| null` | drives the right panel and selected-node UI |
-| `projectName` | `string` | shown in toolbar, exported as `Project.name` |
+| `nodes` | `Node[]` | React Flow shape; `position` мутируется свободно |
+| `edges` | `Edge[]` | React Flow shape; `data.edgeType` несёт `delegation`/`skill_attachment` |
+| `selectedNodeId` | `string \| null` | управляет правой панелью |
+| `projectName` | `string` | отображается в Toolbar, попадает в `Project.name` |
 
-Exposed actions (all selectors destructure these):
+### 6.1 Actions (пошагово что делают)
 
-- `onNodesChange(changes)` / `onEdgesChange(changes)` — wired straight into React Flow; they use `applyNodeChanges` / `applyEdgeChanges`.
-- `onConnect(connection)` — guards against disallowed connections using `getEdgeType(sourceType, targetType)`. Allowed pairs:
-  - `orchestrator → sub_agent`  → `delegation`
-  - `sub_agent → skill`         → `skill_attachment`
-  - `orchestrator → skill`      → `skill_attachment`
-- `addNode(type, position)` — generates `type_N` id, default `label` and default `config`.
-- `updateNode(id, { label?, config? })` — merges updates into `data`.
-- `deleteNode(id)` — removes the node, all incident edges, clears selection if it was selected.
-- `selectNode(id | null)` — sets `selectedNodeId`.
-- `setProjectName(name)` / `setNodesPositions(positions)` / `clearGraph()` / `importProject(json)` / `exportProject()`.
+| Action | Что делает |
+|---|---|
+| `onNodesChange(changes)` | `applyNodeChanges(changes, state.nodes)` — React Flow передаёт сюда drag/resize/select/delete, стор сам применяет |
+| `onEdgesChange(changes)` | то же для рёбер |
+| `onConnect(connection)` | 1) ищет ноды-источник и цель; 2) берёт их `type`; 3) `getEdgeType(srcType, dstType)` возвращает `delegation` / `skill_attachment` / `null`; 4) `null` — отмена; 5) иначе создаёт ребро с правильным `style.stroke` (`#6366f1` indigo для delegation, `#10b981` emerald для skill_attachment) и `animated: true/false` |
+| `addNode(type, position)` | 1) генерит id `type_N` через module-scoped counter; 2) подбирает дефолтный `label` (`Orchestrator` / `Agent` / `Skill`); 3) кладёт `getDefaultConfig(type)`; 4) push в `nodes` |
+| `updateNode(id, { label?, config? })` | spread-merge в `node.data` |
+| `deleteNode(id)` | удаляет ноду + все рёбра, где она source/target; если она была выбрана — `selectedNodeId = null` |
+| `selectNode(id \| null)` | пишет в `selectedNodeId`; если `null` — `GraphCanvas` размонтирует правую панель |
+| `setProjectName(name)` | для input'а в Toolbar |
+| `setNodesPositions(positions)` | bulk-обновление координат; используется Auto-layout |
+| `clearGraph()` | пустые `nodes`/`edges`, `selectedNodeId = null` |
+| `exportProject()` | 1) берёт текущее состояние; 2) собирает `{ id, name, nodes: AppNode[], edges: AppEdge[], createdAt, updatedAt }`; 3) возвращает JSON-строку |
+| `importProject(json)` | 1) `JSON.parse`; 2) для каждой ноды генерит id, тип, рандомную позицию, `data: { label, config }`; 3) для каждого ребра восстанавливает `type:'smoothstep'`, `animated`, `style.stroke`, `data.edgeType`; 4) `set({ nodes, edges, projectName })` |
 
-> `getEdgeType` is the **single source of truth** for connection validity on the store side. The canvas **also** has a parallel `isValidConnection` in `GraphCanvas.tsx` which mirrors it for the UI; keep them in sync if you add a new edge type.
+### 6.2 `getEdgeType` — единственный источник истины
 
-ID generators in this file use module-scoped counters that only increment — re-imports will allocate fresh `type_N` ids because positions are then randomized anyway.
+Возвращает `delegation`/`skill_attachment`/`null` для пары `(src, dst)`:
 
----
+```
+orchestrator → sub_agent  → delegation
+sub_agent    → skill      → skill_attachment
+orchestrator → skill      → skill_attachment
+всё остальное              → null
+```
 
-## 6. Components
+`isValidConnection` в `GraphCanvas.tsx` — точная зеркальная копия. При добавлении новых рёбер обновлять оба.
 
-### `App.tsx`
-Wraps the canvas in `<ReactFlowProvider>` so `useReactFlow()` works in descendants. No other state.
+### 6.3 Module-scoped counter для id
 
-### `GraphCanvas.tsx`
-Top-level layout shell (`h-screen flex flex-col`). Owns the drag-drop wiring:
-
-- `Toolbar` on top.
-- `NodePalette` on the left.
-- `<ReactFlow>` in the middle, with `Background` (dots), `Controls` (zoom/fit + custom auto-layout button), and `MiniMap`.
-- `PropertiesPanel` on the right — rendered **only** when `selectedNodeId !== null`.
-
-Owns:
-- `screenToFlowPosition`, `fitView` from `useReactFlow()`.
-- `handleAutoLayout`: runs `autoLayout(nodes, edges)` → `setNodesPositions(...)` → `fitView({ duration: 400, padding: 0.1 })` in a `requestAnimationFrame`.
-- `<Controls>` shows zoom, fit view, then a separator `<div>` and a custom `<ControlButton>` whose icon is `Workflow` from `lucide-react`.
-
-`<ReactFlow>` props that matter for behaviour:
-- `minZoom={0.005}` — required so users can zoom out on large auto-laid-out graphs.
-- `maxZoom={2}`.
-- `snapToGrid snapGrid={[16, 16]}`.
-- `connectionMode={ConnectionMode.Loose}`.
-- `isValidConnection` mirrors `getEdgeType` from the store.
-
-### `Toolbar.tsx`
-Top bar with:
-- Logo (`Layers` icon) and project name `<input>` (two-way bound to `projectName`).
-- Live counts of orchestrators / agents / skills shown as colored dots.
-- Import / Export buttons (project JSON, downloaded as `<projectName>.json`).
-- `Generate Code` button — calls `generateAgentCode(exportProject())`, downloads `*_agents.py`.
-- Clear button (with `confirm`).
-
-`generateAgentCode(projectJson)` parses the project JSON and emits:
-- `@dataclass` per **Skill** with `name`, `description`, optional `parameters`.
-- `@dataclass` per **Sub-Agent** with `instructions`, `tools: List[Any]` built from attached skills.
-- `@dataclass` per **Orchestrator** with `instructions`, `max_delegations`, `sub_agents: List[Any]` from delegation edges.
-- `create_agent_graph()` factory that returns `{"orchestrators": [...], "agents": [...], "skills": [...]}`.
-- `if __name__ == "__main__":` entrypoint that prints the counts.
-
-All names are `toPascalCase` of the user-entered label, so labels in the UI must be PascalCase-friendly to produce predictable Python class names.
-
-### `nodes/OrchestratorNode.tsx`, `nodes/SubAgentNode.tsx`, `nodes/SkillNode.tsx`
-Custom node renderers. Each is `memo`-wrapped and reads `data.label` plus its own slice of `data.config`. Common conventions:
-- Target handle on top, source handle on bottom (so flows always go top-down).
-- Handles are styled with a per-node gradient (`indigo`, `blue`, `emerald`), `border-2 border-slate-900`, and hover scale.
-- A glow div sits behind the card with `group-hover:opacity-25` (or more on selection).
-- Selected state adds `ring-2 ring-<color>-400/80 ring-offset-2 ring-offset-slate-950 scale-105`.
-
-The actual edge colors:
-- delegation edges: `#6366f1` (indigo) and `animated: true`.
-- skill_attachment edges: `#10b981` (emerald) and static.
-
-### `panels/NodePalette.tsx`
-Left panel with local `collapsed` state. Contains the three draggable cards (`Orchestrator`, `Agent`, `Skill`). Drag uses `dataTransfer.setData('application/reactflow', type)` — the canvas reads it on `drop`.
-
-When **collapsed** it becomes a 64 px strip with the three icons (still draggable, with tooltips) and an expand button.
-
-When **expanded** it has a header (logo + title + collapse `ChevronLeft`), the three cards with descriptions, and a footer hint.
-
-### `panels/PropertiesPanel.tsx`
-Right panel. Reads `selectedNodeId` from the store and finds the node. Shows:
-
-- Node-type-themed header with `×` (deselects).
-- Label input.
-- Type-specific form (`OrchestratorFields`, `SubAgentFields`, `SkillFields`):
-  - Orchestrator: `instructions` textarea, `maxDelegations` number input (1-20).
-  - Agent: `instructions` textarea, list of attached skills (computed from incoming edges from this agent).
-  - Skill: `functionName`, `description`, JSON `parameters` editor (invalid JSON is silently ignored).
-- Connections section listing all incident edges with the other node's label and edge type.
-- `Delete Node` button at the bottom.
-
-`x-deselects` button is *also* the way to collapse the panel — it just calls `selectNode(null)`, and `GraphCanvas` then unmounts the panel.
+`nodeIdCounter` и `edgeIdCounter` инкрементируются на каждое создание, нигде не сбрасываются — загрузка всегда даёт уникальные id. При импорте `nodes[].id` берётся из JSON, но позиции всё равно рандомные, поэтому коллизий не бывает.
 
 ---
 
-## 7. Utilities
+## 7. State management — `useFileSystemStore`
 
-### `utils/autoLayout.ts`
-Hierarchical top-down layout that never overlaps within a level.
+Минимальный стор (`src/store/useFileSystemStore.ts`):
 
-Algorithm:
-1. Build `childrenOf: Map<source, target[]>` from edges; collect `incoming` set.
-2. Roots = nodes whose ids are not in `incoming` (multiple disconnected components are placed side-by-side).
-3. Recursively compute each node's subtree width with memoization:
-   - leaf = `NODE_WIDTH` (240)
-   - internal = `max(NODE_WIDTH, sum(child widths) + (n-1) * X_SPACING)` (60)
-4. Place each node centered over its subtree, with `y = depth * LEVEL_HEIGHT` (300).
-5. Cycle protection via a per-call `Set`.
+```ts
+{ directory: ProjectDirectory | null,
+  isSupported: boolean,  // detect showDirectoryPicker at load
+  lastError: string | null,
+  setDirectory(dir | null), clearDirectory(), setError(msg) }
+```
 
-Returns `Record<nodeId, { x, y }>`. Nodes without a computed position keep their existing position. Output is then fed to `setNodesPositions` in the store.
+`ProjectDirectory` из `services/fileSystem.ts`:
+```ts
+{ handle: FileSystemDirectoryHandle, name: string, verifyWritable() }
+```
 
----
-
-## 8. User flows
-
-1. **Start** — empty canvas, both panels visible. The centre shows a "Drag components from the left panel" hint.
-2. **Add a node** — drag from the left palette to the canvas. The drop position comes from `screenToFlowPosition` (mouse coords → flow coords).
-3. **Connect** — drag from the bottom handle of an orchestrator/agent to the top handle of an agent/skill. Rejected connections show a "not allowed" cursor; allowed ones get the right colour and animated dashed edge for delegation.
-4. **Select** — click any node. PropertiesPanel slides in with a themed header and per-type form. Click anywhere empty to deselect → panel hides.
-5. **Auto-layout** — click the `Workflow` icon in the bottom-right Controls. The whole graph is re-positioned into a clean tree and the viewport fits.
-6. **Save / load** — Toolbar's `Export` writes `<projectName>.json`. `Import` reads it back. `Generate Code` writes Python.
-7. **Generate instruction** — see section 12.
-8. **Clear** — Toolbar's `Clear` button (after confirm) wipes nodes and edges.
+Стор не сериализуется — directory handle живёт только в памяти текущей сессии (handle'ы File System Access API не serializable). `isSupported` выставляется один раз при загрузке модуля.
 
 ---
 
-## 9. How to extend
+## 8. State management — `useCodeGraphStore`
 
-### Add a new node type
-1. Add the type literal to `NodeType` in `src/types/index.ts`.
-2. Add a `XxxConfig` interface and extend the `NodeConfig` union.
-3. In `useGraphStore.ts`:
-   - Extend `getDefaultConfig` switch.
-   - Extend `getEdgeType` if this type can be a source/target of an existing edge, or add new edge types.
-4. Create a new node component under `src/components/nodes/XxxNode.tsx` and re-export it from `src/components/nodes/index.ts`.
-5. Register the type in `nodeTypes` in `src/components/GraphCanvas.tsx`.
-6. Update `paletteItems` in `src/components/panels/NodePalette.tsx`.
-7. Add a form section in `src/components/panels/PropertiesPanel.tsx` (`XxxFields`) and wire it into the type-specific dispatch.
-8. Update `generateAgentCode` in `src/components/Toolbar.tsx` if Python should include this kind.
+Стор (`src/store/useCodeGraphStore.ts`) с UI-состоянием сканирования и снапшотом графа кода:
 
-### Add a new edge type
-1. Add the literal to `EdgeType` in `src/types/index.ts`.
-2. Update `getEdgeType` in the store.
-3. Mirror the rule in `isValidConnection` in `GraphCanvas.tsx`.
-4. Pass the right colour/`animated` flag in `onConnect` (the store decides the style; tweak there).
-5. If the new edge needs a custom renderer, add it to `defaultEdgeOptions` in `GraphCanvas.tsx` via `type="yourEdgeType"` and register the component.
+```ts
+{
+  graph: CodeGraphSnapshot,    // доменная модель — entities + relations
+  phase: 'idle'|'scanning'|'done'|'error'|'cancelled',
+  error: string | null,
+  progress: { scanned, matched, skipped, errors, currentFile? },
+  parserUsed: 'tree-sitter'|'regex-fallback'|'mixed'|null,
+  setProgress, setPhase, setParserUsed,
+  replaceGraph(next), reset()
+}
+```
 
-### Wire a new behaviour into the toolbar
-- Add a button to `src/components/Toolbar.tsx`. If it needs new state, extend `useGraphStore`.
+### 8.1 `CodeGraphSnapshot` (`services/treeSitter/codeGraphStore.ts`)
 
-### Add a new control to the bottom-right React Flow panel
-- Add a `<ControlButton>` inside `<Controls>` in `src/components/GraphCanvas.tsx`. Use `handleAutoLayout` as a template if you need `useReactFlow()` callbacks like `fitView`/`zoomTo`.
+```ts
+{
+  rootPath: string | null,
+  parsedAt: string | null,
+  entitiesById: Record<id, CodeEntity>,
+  entitiesByFile: Record<filePath, id[]>,
+  relations: CodeRelation[]
+}
+```
 
-### Add a project-level setting
-- Extend `Project` in `types/index.ts`, the `exportProject`/`importProject` payload, and the toolbar UI as needed.
+`CodeEntity` имеет `id` формы `<file>::<kind>::<name>::<line>`, `name`, `kind` (file/class/interface/function/method/variable/enum/module/annotation), `signature`, `bodySnippet`, `docComment`, `startLine`/`endLine`, `language`.
 
----
+### 8.2 Hydration через IndexedDB
 
-## 10. Conventions
+При старте приложения `GraphCanvas` вызывает `hydrateCodeGraphStore()` (в `useEffect`), которая читает последний снапшот из IDB-стора `agent-designer-code-graph` и восстанавливает `graph`. Каждый `replaceGraph` сохраняет новый снапшот — пользователю не приходится пересканировать после reload.
 
-- **Strict TypeScript with `verbatimModuleSyntax`** — type-only imports must use `import type { ... }`.
-- **Tailwind classes with `!` prefix** override library defaults (especially inside `<Controls>`/`<MiniMap>` class names).
-- **Glass/dark theme** — colours come from `slate`/`indigo`/`blue`/`emerald` ranges; surfaces are `slate-900/95` or `slate-800/50` over a dark gradient body.
-- **Node data lives at `node.data.label` and `node.data.config`**, not on the node itself. Don't write to `node.label`.
-- **IDs that go into edges** must be valid React Flow node ids — they become the `source` / `target` of edges. The store counters start at 1 per session; imports keep original ids but positions are randomized by `importProject`.
-- **No tests yet** — verify changes by running `npm run build` (full TS check via `tsc -b`) and `npm run dev` to interactively test the UI.
+### 8.3 Helpers
+
+`describeGraph(snapshot)` — `{ totalEntities, byKind, byLanguage }` — для UI-карточек статистики.
+`findMatchingEntities(graph, query)` — поиск сущностей по имени (для поиска в `CodeGraphToolbarButton`).
 
 ---
 
-## 11. Build & dev commands
+## 9. Single-port сервер-мост (qwen)
 
-Single-port rule: the React app and the qwen bridge share one origin — port
-`5173` in dev (Vite) and port `3001` in prod (`server/prod-server.mjs`).
-The client (`src/services/qwenClient.ts`) posts to relative `/generate`.
+Подробная архитектура — см. фичу 11.8 (генерация инструкции). Краткая суть:
+
+- `server/qwenHandler.mjs` — единственный файл с реальной логикой `spawn('qwen', ['-p', prompt])`. Экспортирует `handleGenerate`, `handleHealth`, `dispatchBridge`.
+- `vite.config.ts` — плагин `qwenBridge()`, который dynamic-imports `qwenHandler.mjs` и монтирует middleware в `server.middlewares` через `configureServer` (dev) и `configurePreviewServer` (preview).
+- `server/prod-server.mjs` — единый Node-сервер: mux `/generate`+`/health` через `dispatchBridge`, остальное → `dist/<file>` с SPA fallback на `index.html`. Слушает `127.0.0.1:PORT` (default 3001).
+- `src/services/qwenClient.ts` — fetch на relative `/generate` (same-origin, без CORS).
+
+То есть и dev, и prod делят один и тот же handler — нет дублирования логики.
+
+---
+
+## 10. Шаблоны (`templates/`)
+
+**`templates/agent-template.md`** — reference для генерации AGENT.md:
+
+```markdown
+---
+name: agent-name
+description: Краткое описание того, когда и как использовать этого агента
+model: inherit   # Опционально: inherit, fast, modelId или authType:modelId
+approvalMode: auto-edit   # Опционально: default, plan, auto-edit, yolo, bubble
+tools:           # Опционально: белый список инструментов
+  - tool1
+  - tool2
+disallowedTools: # Опционально: чёрный список инструментов
+  - tool3
+---
+Содержимое системного промпта.
+Поддерживаются несколько абзацев.
+```
+
+**`templates/skill-template.md`** — reference для SKILL.md:
+
+```markdown
+---
+name: your-skill-name
+description: Brief description of what this Skill does and when to use it
+priority: 10
+---
+
+# Your Skill Name
+
+## Instructions
+Provide clear, step-by-step guidance for Qwen Code.
+
+## Examples
+Show concrete examples of using this Skill.
+```
+
+Эти файлы — **источник истины** для фичи 11.8. Они бандлятся в JS через Vite `?raw` import и попадают в промпт Qwen. Output валидируется парсером из `instructionGenerator.ts` (см. фичу 11.8).
+
+---
+
+## 11. Реализованные фичи
+
+### 11.1 Drag-and-drop canvas (добавление нод)
+
+**Где:** `src/components/GraphCanvas.tsx`, `panels/NodePalette.tsx`, `store/useGraphStore.ts`.
+**Триггер:** пользователь перетаскивает карточку из левой палитры.
+
+**Step-by-step:**
+
+1. `NodePalette` ставит каждой карточке `draggable`, при `dragstart` пишет `e.dataTransfer.setData('application/reactflow', type)`. Различаются типы: `orchestrator` / `sub_agent` / `skill`.
+2. `GraphCanvas` на `<ReactFlow>` через `onDragOver={e => e.preventDefault()}` разрешает drop.
+3. `onDrop(e)`:
+   - достаёт тип из `e.dataTransfer.getData('application/reactflow')`
+   - получает координаты через `screenToFlowPosition({x:e.clientX, y:e.clientY})` из `useReactFlow()`
+   - вызывает `addNode(type, position)` из стора
+4. `addNode` (см. §6.1) создаёт ноду с дефолтными label/config и новым id.
+5. React Flow через `applyNodeChanges` рендерит новую ноду.
+
+**Как расширить:**
+- Добавить тип — см. §14.
+
+---
+
+### 11.2 Свойства ноды + формы по типу
+
+**Где:** `src/components/panels/PropertiesPanel.tsx`, `src/types/index.ts`.
+**Триггер:** клик по ноде → `selectNode(nodeId)` → `selectedNodeId !== null` → правый panel монтируется.
+
+**Step-by-step:**
+
+1. `PropertiesPanel` ищет `nodes.find(n => n.id === selectedNodeId)`. Если нет — `GraphCanvas` вообще не рендерит компонент (auto-hide).
+2. Хедер с themed background (indigo/blue/emerald) показывает тип ноды, label, кнопку `×` (вызывает `selectNode(null)` → panel размонтируется).
+3. `handleConfigChange(key, value)` вызывает `updateNode(nodeId, { config: { ...cfg, [key]: value } })` — merge-обновление.
+4. Per-type форма:
+   - **OrchestratorFields**: `instructions` textarea, `maxDelegations` number (1–20). Под textarea — кнопка `<GenerateButton>` для открытия `InstructionGeneratorDialog`.
+   - **SubAgentFields**: `instructions` textarea + список attached skills (вычисляется по входящим `skill_attachment`-рёбрам). Под textarea — `<GenerateButton>`.
+   - **SkillFields**: `functionName`, `description` (textarea) + JSON `parameters` (с `try/catch` молчаливым игнорированием невалидного JSON). Под `description` — `<GenerateButton>`.
+5. Секция "Connections" — список всех incident edges (source или target), показывает «label соседа + тип ребра».
+6. Кнопка `Delete Node` внизу → `deleteNode(id)`.
+
+`TextareaField`, `NumberField`, `GenerateButton` — локальные компоненты в том же файле.
+
+**Как расширить:**
+- Добавить type — см. §14, плюс форма и генератор.
+
+---
+
+### 11.3 Свёртываемая левая панель
+
+**Где:** `src/components/panels/NodePalette.tsx`.
+**Триггер:** клик по `ChevronLeft` в header'е (или на свёрнутом — `ChevronRight`).
+
+**Step-by-step:**
+
+1. Локальный `useState<boolean>(false)` хранит `collapsed`.
+2. `collapsed=true`:
+   - Ширина: `w-16` (64 px).
+   - Шапка: одна кнопка `ChevronRight` (icon) для разворачивания.
+   - Тело: `paletteItems.map(...)` рендерит только иконки (без label/description), вертикально, с `title=...` для tooltip.
+   - Каждая иконка-карточка остаётся `draggable` — перетаскивание работает и в свёрнутом виде.
+3. `collapsed=false`:
+   - Ширина: `w-72`.
+   - Header: иконка `Layers` + «Components» + subtitle «Drag to canvas» + кнопка `ChevronLeft` свернуть.
+   - Body: три большие карточки с icon, label, description, hover-glow.
+4. State — локальный, не персистится.
+
+**Как расширить:**
+- Сохранять состояние — перенести флаг в `useGraphStore` (или отдельный `useUiPrefsStore`).
+
+---
+
+### 11.4 Автоскрытие правой панели
+
+**Где:** `src/components/GraphCanvas.tsx`.
+**Триггер:** `selectedNodeId === null`.
+
+**Step-by-step:**
+
+1. `GraphCanvas` читает `selectedNodeId` из стора.
+2. В JSX:
+   ```tsx
+   {selectedNodeId !== null && <PropertiesPanel />}
+   ```
+   — компонент физически не рендерится, его DOM размонтируется.
+3. `×` в PropertiesPanel вызывает `selectNode(null)` — это эквивалент сворачивания.
+
+Никакого local state — `selectedNodeId` уже служит индикатором.
+
+---
+
+### 11.5 Auto-layout (workflow кнопка в Controls)
+
+**Где:** `src/utils/autoLayout.ts`, `src/components/GraphCanvas.tsx`, `store/useGraphStore.ts`.
+**Триггер:** клик по `Workflow`-иконке в правом нижнем углу холста.
+
+**Step-by-step:**
+
+1. `<Controls>` от React Flow содержит zoom/fit-view плюс разделитель и custom `<ControlButton onClick={handleAutoLayout}>` с `Workflow`-иконкой. Кнопка disabled при пустом холсте.
+2. `handleAutoLayout`:
+   - Берёт текущие `nodes`, `edges` из стора.
+   - Вызывает `autoLayout(nodes, edges)` — получает `Record<id, {x, y}>`.
+   - `setNodesPositions(positions)` — bulk-update координат всех нод в сторе.
+   - `requestAnimationFrame(() => fitView({ duration: 400, padding: 0.1 }))` — подгоняет viewport к новым границам после раскладки.
+
+**Алгоритм `autoLayout` (иерархический, без перекрытий):**
+
+1. Строит `childrenOf: Map<source, target[]>` и `incoming: Set<id>` из рёбер. Self-loop'и и невалидные target'ы пропускаются.
+2. Roots = ноды без входящих рёбер. Сортируются по `nodeSortKey` (стабильно по `type_N`).
+3. Мемоизированный `computeWidth(id, stack)`:
+   - leaf (нет детей) → `NODE_WIDTH = 240`
+   - internal → `max(NODE_WIDTH, Σ child_width + (n-1) * X_SPACING)`, `X_SPACING = 60`
+   - cycle защита через `Set`
+4. `place(id, leftX, depth)`:
+   - узел центрируется над своим subtree: `x = leftX + subtreeWidth/2 - NODE_WIDTH/2`
+   - `y = depth * LEVEL_HEIGHT`, `LEVEL_HEIGHT = 300`
+   - дети рекурсивно кладутся с курсором по `leftX`, с шагом `cw + X_SPACING`
+5. Между root-компонентами — `ROOT_X_SPACING = 100`.
+6. Ноды, для которых нет позиции в выводе (крайне редко), сохраняют текущую.
+
+Результат: для базовой конфигурации (213 узлов) — 3 уровня, **0 наложений** в одном уровне.
+
+**Step-by-step валидация на базовой конфигурации:**
+- 8 roots (все 8 орчестраторов — нет входящих рёбер)
+- Width: 49 180 px, 3 горизонтальных уровня
+- Horizontal overlaps in same level: **0**
+
+**Как расширить:**
+- Изменить `NODE_WIDTH`/`X_SPACING`/`LEVEL_HEIGHT` под более широкие карточки.
+- Поддержать radial / force layouts — заменить `place(...)` другим алгоритмом, контракт `Record<id, {x,y}>` остаётся.
+
+---
+
+### 11.6 Toolbar (имя проекта, импорт, экспорт, Clear)
+
+**Где:** `src/components/Toolbar.tsx`, `store/useGraphStore.ts`.
+
+**Step-by-step:**
+
+1. **Top bar** с логотипом (`Layers`), `<input>` для `projectName` (controlled, `onChange={e => setProjectName(e.target.value)}`).
+2. **Живые счётчики** — три chip'а с цветными точками: `nodes.filter(n => n.type === 'orchestrator').length` и т.д.
+3. **Import** — `<input type="file" accept=".json" hidden>` реф. Клик по кнопке открывает диалог выбора файла. На `change`: `FileReader.readAsText` → `importProject(content)`.
+4. **Export** — `exportProject()` → `Blob` с `application/json` → `<a download>` кликается программно → URL.revokeObjectURL. Имя файла: `<projectName>.json` со whitespace, заменённым на `_`.
+5. **Generate Code** — отдельная фича, см. §11.7.
+6. **Clear** — `confirm()` → `clearGraph()` (все ноды/рёбра, `selectedNodeId = null`).
+
+---
+
+### 11.7 Python codegen (`generateAgentCode`)
+
+**Где:** `src/components/Toolbar.tsx`, `generateAgentCode(projectJson: string)`.
+**Триггер:** кнопка «Generate Code» в Toolbar.
+
+**Step-by-step:**
+
+1. `handleGenerateCode` вызывает `exportProject()` → получает JSON-строку проекта.
+2. Парсит её, фильтрует ноды по типу: `orchestrators`, `agents`, `skills`.
+3. Строит:
+   - `@dataclass` для каждого **Skill** с `name` (из `functionName` или label), `description`, опционально `parameters`.
+   - Map `agentSkillsMap[agentId]`: для каждого sub-agent собирает список классов скилов через рёбра `skill_attachment`.
+   - `@dataclass` для каждого **Sub-Agent** с `name`, `instructions`, `tools: List[Any] = field(default_factory=lambda: [<SkillClass>()])`.
+   - Map `orchestratorAgentsMap[orchId]`: для каждого орчестратора собирает список классов агентов через рёбра `delegation`.
+   - `@dataclass` для каждого **Orchestrator** с `name`, `instructions`, `max_delegations`, `sub_agents: List[Any] = ...`.
+4. Генерирует `create_agent_graph()` factory → возвращает dict `{"orchestrators":[...], "agents":[...], "skills":[...]}`.
+5. Печатает `if __name__ == "__main__":` entrypoint с количествами.
+6. Имена классов — через `toPascalCase(label)` (split на `[\s_-]+`, capitalize каждое слово). Поэтому labels лучше делать PascalCase-friendly.
+7. Скачивает `*_agents.py` тем же механизмом Blob + `<a>`.
+
+**Как расширить:**
+- Добавить вывод typing imports (`from typing import List, Dict, Any` уже есть) — норма.
+- Включить per-skill `parameters` typing — сейчас сериализуется как `Dict[str, Any]`.
+
+---
+
+### 11.8 Генерация Markdown-инструкции через Qwen
+
+**Где:** `src/components/InstructionGeneratorDialog.tsx`, `src/services/instructionGenerator.ts`, `src/services/qwenClient.ts`, `server/qwenHandler.mjs`, `templates/*.md`.
+
+Полный pipeline состоит из трёх фаз: **сборка промпта → вызов Qwen → валидация и сохранение**.
+
+#### 11.8.1 Сборка промпта (`buildPromptForNode`)
+
+1. Импортируются raw-строки шаблонов через Vite `?raw`:
+   ```ts
+   import agentTemplate from '../../templates/agent-template.md?raw';
+   import skillTemplate from '../../templates/skill-template.md?raw';
+   ```
+2. Извлекаются метаданные ноды:
+   - `node.type` (для skill: `functionName`, `description`; для agent: `instructions`, `maxDelegations`).
+   - `safeSlug(label)` вычисляется один раз и помещается в промпт как «Slug (use as `name`)» — это гарантирует, что Qwen использует стабильное имя.
+3. Считается upstream/downstream через React Flow edges:
+   - `edges.filter(e => e.target === node.id).map(e => nodes.find(n => n.id === e.source)?.data.label)` — upstream.
+   - `edges.filter(e => e.source === node.id).map(e => nodes.find(n => n.id === e.target)?.data.label)` — downstream.
+4. **Опционально** — `collectContextForNode(node, codeGraph)`:
+   - Берёт top-5 матчей из code-graph по `safeSlug(label)` + `functionName` + tokens из `instructions`.
+   - Скоринг: точное совпадение имени = 10, substring = 4, штраф за тривиальные accessor'ы.
+   - Рендерит Markdown блок с сигнатурами, `file:line`, doc-comments, обрезанными телами в fenced block'е (` ```ts ` или ` ```python `).
+5. Склеиваются блоки промпта в фиксированном порядке:
+   ```
+   - intro (what you're doing)
+   - ## Node
+   - ## Upstream / ## Downstream
+   - ## Project Code Context
+   - ## User Request
+   - ## Template (output MUST match this structure)
+   - ## <Skill|Agent> — Required Frontmatter
+   - ## <Skill|Agent> — Required Body
+   - ## Output Rules
+   ```
+6. Шаблон (`skill-template.md` или `agent-template.md`) вставляется целиком в fenced code block — Qwen видит точную структуру с комментариями.
+
+#### 11.8.2 Сетевой вызов
+
+1. `qwenClient.generateViaQwen(prompt)`:
+   - `fetch('/generate', { method:'POST', headers:'application/json', body:JSON.stringify({prompt}) })`
+   - Same-origin, no CORS.
+   - `QwenUnavailableError` бросается на network/non-2xx/JSON-`error`.
+2. На сервере (`server/qwenHandler.mjs` → `handleGenerate`):
+   - `JSON.parse` body → `{ prompt: string }`.
+   - `validate`: prompt required, ≤256 KB.
+   - `spawn('qwen', ['-p', prompt], { shell: win32 })` с `process.env`.
+   - Слушает stdout/stderr, таймаут `QWEN_TIMEOUT_MS` (default 120 s) — SIGTERM при таймауте.
+   - Возвращает `{ result: stdout, error: null|string }` с правильным HTTP-кодом (200/400/502/504).
+3. Vite-middleware (dev) или `prod-server.mjs` (prod) обслуживают этот handler — никаких изменений в кодовой базе для переключения режима.
+
+#### 11.8.3 Валидация и сохранение
+
+1. Response приходит → `setDraft(result.trim())` в dialog state.
+2. `parseMarkdownFrontmatter(text)`:
+   - Проверяет `text.startsWith('---')`.
+   - Ищет ближайшую закрывающую строку `---` на отдельной строке.
+   - Между ними парсит YAML subset: `key: scalar | list | empty`, с поддержкой `# comment` и кавычек вокруг строк.
+   - Возвращает `{ frontmatter: {...}, body: string, missingRequired: [], errors: [] }`.
+3. `validateSkillFrontmatter(parsed)` / `validateAgentFrontmatter(parsed)`:
+   - `SKILL_EXPECTATIONS.required = ['name', 'description']`, optional = `['priority']`, bodyHeadings = `['Instructions', 'Examples']`.
+   - `AGENT_EXPECTATIONS.required = ['name', 'description']`, optional = `['model', 'approvalMode', 'tools', 'disallowedTools']`.
+   - Проверяет `name` формат `/^[a-z0-9_]+$/` (snake_case).
+   - Сообщает о пропавших секциях body — каждое отсутствующее heading добавляет в `errors`.
+4. `<ValidationChip draft nodeType />`:
+   - пустой draft → серое italic напоминание.
+   - `schemaOk` (нет missing и нет errors) → зелёный `✓ template — Matches the … structure`.
+   - иначе → янтарный `⚠ template — missing name · Body is missing `## Instructions``.
+5. Когда пользователь жмёт **Save**:
+   - `relativePathForNode(node)`:
+     - skill → `skills/<slug>/SKILL.md`
+     - orchestrator/sub_agent → `agents/<slug>/AGENT.md`
+     - где `slug = safeSlug(label)`
+   - `applyToConfig(text, path)` обновляет `config.description` (для skill) или `config.instructions` (для агента) и `config.instructionFilePath = path`.
+   - Запись на диск (`writeInstructionToDisk`) или скачивание (`downloadAsFile`):
+     - File System Access API: walk через `getDirectoryHandle(part, {create:true})`, `getFileHandle(name, {create:true})`, `createWritable().write(text)`.
+     - Fallback: Blob + `URL.createObjectURL` + `<a download>`.
+     - При записи без папки — текст ещё и кладётся в in-memory Map через `rememberInMemory` (для пере-открытия диалога в той же сессии).
+   - `updateNode(nodeId, { config })` фиксирует изменения в сторе.
+6. Dialog закрывается, UI показывает «✓ saved to skills/foo/SKILL.md» в label'е превью.
+
+#### 11.8.4 Ошибки и UX
+
+| Симптом | Что видит пользователь |
+|---|---|
+| `qwen` не в PATH | Диалог показывает красный блок: «could not spawn qwen: … Set QWEN_COMMAND.» |
+| Bridge не отвечает | «Cannot reach the qwen bridge. Make sure the dev server or prod server is running.» |
+| Браузер без FS Access | Поле выбора папки скрыто; кнопка Save превращается в «Save & download»; файл скачивается через браузер |
+| Папка без write-разрешения | «You did not grant write access. Re-pick the folder and allow modification.» |
+| YAML frontmatter отсутствует или невалиден | `<ValidationChip>` показывает конкретную причину (`missing name`, `Body is missing \`## Instructions\`` и т.п.) |
+
+**Контракт шаблонов** (высокоуровневый):
+- Agent: frontmatter — `name` (snake_case), `description`; опционально `model` (`inherit`/`fast`/modelId/authType:modelId), `approvalMode` (`default`/`plan`/`auto-edit`/`yolo`/`bubble`), `tools`, `disallowedTools`. Body — многоабзацный system prompt.
+- Skill: frontmatter — `name` (snake_case), `description`; опционально `priority` (int 1-100). Body — `# <title>` + `## Instructions` + `## Examples`.
+- `name` берётся из `safeSlug(node.label)` — этот slug передаётся в промпте, чтобы Qwen использовал согласованное имя.
+
+**Как расширить:**
+- Добавить новое обязательное поле в `SKILL_EXPECTATIONS.required`/`AGENT_EXPECTATIONS.required` — диалог сразу начнёт его проверять.
+- Сменить тон/дополнительные секции — правится шаблон в `templates/*.md` + Vite пересоберёт бандл на лету.
+- Заменить `runParserForFile` на LLM-based анализ кода для первого прохода планирования.
+
+---
+
+### 11.9 Tree-sitter code-graph scan
+
+**Где:** `src/services/treeSitter/*`, `src/store/useCodeGraphStore.ts`, `src/components/CodeGraphToolbarButton.tsx`, `scripts/fetch-grammars.cjs`.
+
+#### 11.9.1 Загрузка WASM
+
+1. `scripts/fetch-grammars.cjs` скачивает runtime (`web-tree-sitter.wasm` из `node_modules/`) и грамматики (`tree-sitter-{typescript,javascript,python}.wasm`) с официальных GitHub-релизов, кладёт в `public/grammars/`. Закреплённые версии — env-переменными (`TREE_SITTER_TYPESCRIPT_VERSION` и т.п.).
+2. `npm run grammars` запускает этот скрипт.
+3. Vite отдаёт `/grammars/*.wasm` из `public/`. Prod-сервер отдаёт их же из `dist/grammars/*.wasm`.
+4. `services/treeSitter/loader.ts`:
+   - `Parser.init({ locateFile: name => \`/grammars/${name}\` })` — runtime self-locates.
+   - `getLanguage(lang)` для каждого языка: `fetch(url)` → `arrayBuffer()` → сохраняет в IDB-стор `agent-designer-grammar-cache` → `Parser.Language.load(new Uint8Array(buf))`.
+   - `detectAvailableGrammars()` — HEAD-запросы для каждого URL, чтобы UI пометил «tree-sitter available» / «regex fallback» без подгрузки.
+
+#### 11.9.2 Парсер: tree-sitter или regex (`codeParserSelector.runParserForFile`)
+
+1. `languageForExtension(ext)` маппит расширение в `SupportedLanguage` (`typescript|tsx|javascript|python`).
+2. Сначала пробует `TreeSitterCodeParser.parseFile(filePath, source)` (async):
+   - `getLanguage(resolution.language)` → загружает Language.
+   - `new Parser().setLanguage(lang).parse(source)` → `tree.rootNode`.
+   - `extractForResolution(tree, filePath, source, resolution)`:
+     - для `python` → `extractEntities_Python`.
+     - иначе → `extractEntities_TS` (TS/JS/TSX).
+3. При ошибке или отсутствии грамматики — `RegexCodeParser.parse(filePath, source, language)`:
+   - TS/JS: regex'ы для `class`/`interface`/`function`/`enum`/`type`/`const`/`import`, brace-balanced для тела.
+   - Python: regex'ы для `class`/`def`/`import`, indent-balanced для тела.
+4. Оба возвращают единый `ParseResult`: `{ entities, relations }`.
+
+#### 11.9.3 Extractor (TS/JS) — что вытаскивается
+
+- `function_declaration`, `generator_function_declaration`, `arrow_function` (внутри `variable_declarator`)
+- `class_declaration`/`class`, `interface_declaration`, `enum_declaration`
+- `method_definition`
+- `import_statement` (создаёт module entities + `imports` relation)
+- `export_statement` (рекурсия в inner)
+- `lexical_declaration` (recurse в `variable_declarator`)
+- Каждый entity: `id`, `kind`, `name`, `signature`, `bodySnippet` (≤24 строк, ≤2.4 KB), `docComment`, `filePath`, `startLine`/`endLine`, `language`, `parentId`.
+
+#### 11.9.4 Extractor (Python)
+
+- `function_definition`, `class_definition`, `import_statement`/`import_from_statement`, `decorated_definition`.
+
+#### 11.9.5 Folder scanner (`folderScanner.scanProjectDirectory`)
+
+1. Требует `FileSystemDirectoryHandle` (FS Access API). Если недоступно — выбрасывает ошибку.
+2. Строит `progress = { scanned, matched, skipped, errors, done }`.
+3. `walk(dir.handle, '')` рекурсивно собирает пути через `handle.entries()`. Пропускает `node_modules`, `.git`, `dist`, `coverage`, `target`, `__pycache__`, директории начинающиеся с `.`.
+4. Фильтрует по `languageForExtension(ext)` — увеличивает `matched`.
+5. Останавливается при `options.maxFiles` или сигнале отмены.
+6. Обрабатывает matched в чанках по 25 файлов:
+   - Для каждого файла: `getDirectoryHandle(parts) → getFileHandle(name) → file.text()`.
+   - Файл >1 MiB → `skipped++`.
+   - `runParserForFile(filePath, source)` → `mergeParseResult(graph, ...)` (pre-drop entities по файлу + push новых + добавить relations).
+   - `await new Promise(r => setTimeout(r, 0))` между чанками — yield UI thread.
+7. По завершении — `progress.done = true`.
+
+`mergeParseResult(snapshot, { filePath, entities, relations })`:
+- Удаляет все ранее существующие entities по этому файлу (через `entitiesByFile[filePath]`) + связанные relations.
+- Добавляет новые entities и relations.
+
+#### 11.9.6 UI: плавающая панель `CodeGraphToolbarButton`
+
+1. Bottom-left, fixed, открывается по клику.
+2. Если `directory` не выбрана — кнопка Scan now сначала зовёт `pickProjectDirectory()`, потом сканирование.
+3. `beginScan`: status `scanning`, прогресс через `onProgress`, по завершении `replaceGraph(graph)` → IDB-сохранение.
+4. **Search** по имени (top-8 совпадений из `findMatchingEntities`).
+5. **Stats**: сетка с подсчётом per kind.
+6. **Parser indicator**: `tree-sitter` / `regex-fallback` показывается как маленькая pill.
+
+#### 11.9.7 Context collector
+
+1. `codeNameCandidates(node)`:
+   - Skill: `safeSlug(label)`, `safeSlug(functionName)`.
+   - Agent/Orchestrator: `safeSlug(label)` + первые ~6 токенов из `instructions`, прошедшие фильтр `^[a-zA-Zа-яА-ЯёЁ_][\w]*$`.
+2. `collectContextForNode(node, graph)`:
+   - Скорит все entities (не file/module) по совпадению имён с candidates (exact=10, substring=4), штраф −1 для коротких (≤80 chars) function-entities.
+   - Берёт top-5, рендерит Markdown с `### <signature>`, `*File:* \`path\`, line N`, JSDoc/doc, обрезанный body в ` ```ts ` или ` ```python `.
+
+`buildPromptForNode` инжектит результат под `## Project Code Context` — Qwen использует это как ground truth, не как намёк.
+
+#### 11.9.8 Снапшот в IndexedDB
+
+- Стор `agent-designer-code-graph` (version 1), ключ `'latest'`.
+- `hydrateCodeGraphStore()` читает на старте.
+- `replaceGraph` пишет после каждого скана.
+- `reset` очищает и UI и persistence.
+
+#### 11.9.9 Failure modes
+
+| Симптом | Поведение |
+|---|---|
+| WASM 404 на `/grammars/*` | `runParserForFile` ловит, fallback на `RegexCodeParser`. UI работает, entities менее точны. |
+| Браузер без FS Access | Скан недоступен; dialog прячет trigger или показывает ошибку |
+| Файл >1 MiB | Тихо пропускается |
+| Сетевой сбой при первой загрузке | IDB cache используется на следующем визите |
+
+---
+
+## 12. Build & dev
+
+Single-port rule: React-приложение и qwen-bridge делят один origin — `5173` в dev, `3001` в prod. Клиент ходит на relative `/generate`.
 
 ```sh
 npm install
-node scripts/fetch-grammars.cjs   # vendor tree-sitter WASM into public/grammars/
+node scripts/fetch-grammars.cjs   # вендорит WASM в public/grammars/
 
-npm run dev        # vite @ :5173, /generate middleware active
+npm run dev        # vite @ :5173, /generate middleware активен
 npm run build      # tsc -b + vite build → dist/
-npm run prod       # node server/prod-server.mjs @ :3001 (serves dist + /generate)
+npm run prod       # node server/prod-server.mjs @ :3001 (dist/ + /generate)
 npm run server     # build && prod
-npm run preview    # vite preview @ :4173, /generate middleware active
+npm run preview    # vite preview @ :4173, /generate middleware активен
+npm run grammars   # обновить public/grammars/*.wasm
 npm run lint       # oxlint
 
-# Regenerate base-config.json:
+# Регенерировать base-config.json:
 node scripts/generate-base-config.cjs
 ```
 
----
+Environment overrides (все опциональны):
 
-## 12. Instruction generator (Qwen integration)
-
-Generate a Markdown instruction for any node using a locally-installed Qwen
-CLI. The browser cannot spawn processes, so a tiny Node bridge is required —
-and it lives on the **same origin** as the web app:
-
-| Runtime | Mount point | Server file |
+| var | default | значение |
 |---|---|---|
-| Vite dev / `vite preview` | `server.middlewares` for `/generate`, `/health` | `vite.config.ts` → `qwenBridge()` plugin |
-| Production | Combined `dist/` + bridge in one Node process | `server/prod-server.mjs` |
-
-Both mount points delegate to the same handler in `server/qwenHandler.mjs`,
-so there is exactly one `qwen -p` implementation across the whole project.
-
-### Components
-
-| Piece | Role |
-|---|---|
-| `server/qwenHandler.mjs` | Shared handler. Exports `handleGenerate(req, res)`, `handleHealth(req, res)`, and a one-shot `dispatchBridge(req, res, urlPath)`. Reads `{prompt}` body, validates, spawns `qwen -p <prompt>`, returns `{ result, error }`. Honours `QWEN_COMMAND` and `QWEN_TIMEOUT_MS`. |
-| `vite.config.ts` | Vite plugin that dynamic-imports the handler in `configureServer` (dev) and `configurePreviewServer` (preview) and adds `qwenBridge()` middleware. Lives entirely inside the `5173` origin. |
-| `server/prod-server.mjs` | Single-port production entrypoint. Muxes `/generate`, `/health` → `dispatchBridge`, anything else → `dist/<file>` with SPA fallback to `index.html`. Reads env: `PORT` (default 3001), `HOST` (default 127.0.0.1). |
-| `src/services/qwenClient.ts` | `generateViaQwen(prompt)` posts to **relative** `/generate` and throws `QwenUnavailableError` with a friendly message on any failure (network, non-2xx, spawn error, timeout). `checkHealth` queries `/health`. `serverUrl` opt remains for power users. |
-| `src/services/instructionGenerator.ts` | `buildPromptForNode(node, userRequest, ctx)` assembles the prompt (node metadata + upstream/downstream labels + matching tree-sitter code snippets + per-type required sections). `relativePathForNode(node)` returns `agents/<slug>/AGENT.md` or `skills/<slug>/SKILL.md`. |
-| `src/services/fileSystem.ts` | `pickProjectDirectory()`, `writeInstructionToDisk(dir, path, text)`, `readInstructionFromDisk(dir, path)`. Plus an in-memory + browser-download fallback for browsers without the FS Access API. |
-| `src/store/useFileSystemStore.ts` | Holds the current `ProjectDirectory` (handle + name) plus `isSupported` (detected at load) and `lastError`. Lives for the session only — directory handles are not serializable. |
-| `src/components/InstructionGeneratorDialog.tsx` | Modal: textarea for the user request → `Generate` calls the bridge → editable preview → `Save` writes the file (or downloads a fallback). Closes on save or via `×`/Escape/backdrop click. |
-| Per-type field in `PropertiesPanel` | A small `Generate instruction with Qwen…` link (Sparkles icon) opens the dialog. Wired through a local `generatorOpen` boolean. |
-
-### Flow
-
-1. User picks a project folder (only on Chromium-class browsers). The handle is kept in `useFileSystemStore`.
-2. User opens a node and clicks `Generate instruction`. The dialog opens with the node's existing instruction text (or the on-disk file content if `instructionFilePath` is set) preloaded.
-3. User types a request. `Generate` POSTs the assembled prompt to **same-origin** `/generate`, which `spawn`s `qwen -p <prompt>` and waits up to `QWEN_TIMEOUT_MS` for stdout.
-4. Result lands in the editable preview. The user can edit freely.
-5. `Save`:
-   - If a project folder is picked → write to disk via `FileSystemAccess`, set `instructionFilePath`, and mirror the text into `node.config.instructions` (or `description` for skills).
-   - Otherwise → trigger a browser download of `<fileName>.md`, remember the path in-memory, and mirror the text into the config field.
-
-### Why one origin matters
-
-CORS, mixed content, and `fetch` quirks all go away when the static UI and the
-JSON `/generate` endpoint share a scheme/host/port. The bridge responds to
-every browser call with `Access-Control-Allow-Origin: *` only for the
-hypothetical case where you proxy it onto a separate domain; in the default
-single-port setup it isn't required.
-
-### Failure modes and UX
-
-| Symptom | What user sees |
-|---|---|
-| `qwen` not on PATH | Red error in the dialog: "could not spawn qwen: … Is Qwen installed?" Set `QWEN_COMMAND`. |
-| Bridge down / wrong port | Red error: "Cannot reach the qwen bridge. Make sure the dev server or prod server is running and Qwen CLI is installed." |
-| Vite dev server missing the plugin | Generator dialog also fails with the same generic error — verify `vite.config.ts` is committed and a fresh `npm install` was run. |
-| Browser without FS Access | Folder picker hidden; Save button labelled "Save & download"; file is downloaded via the browser. |
-| Folder picked without write permission | Dialog surfaces "You did not grant write access. Re-pick the folder and allow modification." |
+| `PORT` | `3001` (prod) | listen port (dev — Vite 5173) |
+| `HOST` | `127.0.0.1` | bind host |
+| `QWEN_COMMAND` | `qwen` | CLI-бинарь, вызываемый с `-p <prompt>` |
+| `QWEN_TIMEOUT_MS` | `120000` | таймаут per-request |
 
 ---
 
-## 13. Code-graph (tree-sitter integration)
+## 13. Conventions
 
-Optional feature that walks the picked project folder, parses each supported
-file, and builds an in-memory graph of code entities (classes / functions /
-methods / interfaces / imports). When you generate an instruction, matching
-entities are pulled into the prompt as Markdown snippets, so Qwen writes from
-real signatures and doc comments rather than guessing.
+- **Strict TS, `verbatimModuleSyntax`** — для всех type-only импортов используется `import type { ... }`.
+- **Tailwind `!`-prefix** — переопределяет стили library-defaults (особенно `<Controls>`/`<MiniMap>` className).
+- **Glass/dark theme** — slate/indigo/blue/emerald; surfaces `slate-900/95`/`slate-800/50` поверх тёмного градиента.
+- **Данные ноды** живут в `node.data.label` и `node.data.config`, не на самой ноде. Не писать в `node.label`.
+- **ID для рёбер** должны быть валидными React Flow id'ами — они становятся `source`/`target`.
+- **Module-scoped counter** для id (`nodeIdCounter`, `edgeIdCounter`) никогда не сбрасываются.
+- **`getEdgeType`** — единственный источник правил допустимых рёбер. `isValidConnection` в `GraphCanvas.tsx` — его зеркало. Держать в синхроне.
+- **Шаблоны** в `templates/*.md` — единственный источник истины для генерации инструкций. Парсер там же валидирует output.
+- **`safeSlug(node.label)`** — канонический `name` для генерации.
+- **Никаких тестов** пока — проверять `npm run build` (полная tsc-проверка) + ручной `npm run dev`.
 
-### Two-tier parser
+---
 
-The codebase exposes a unified `runParserForFile(path, source)` in
-`services/treeSitter/codeParserSelector.ts`. It tries tree-sitter first
-(`TreeSitterCodeParser.parseFile`) and silently falls back to
-`RegexCodeParser.parse` if the grammar WASM for the file's language is not
-available. Both parsers implement `CodeParser` and return the same
-`ParseResult` shape (defined in `codeGraph.ts`).
+## 14. How to extend (готовые рецепты)
 
-The `CodeParser` interface is the seam — you can swap in another backend
-(e.g. a worker offload, an LLM-based extractor) without touching the
-graph, store, scanner, or the instruction generator.
+### 14.1 Добавить новый тип ноды
 
-### Tree-sitter loading
+1. `NodeType` в `src/types/index.ts` ← новый литерал.
+2. Новая `XxxConfig` + расширить union `NodeConfig`.
+3. `useGraphStore.ts`:
+   - `getDefaultConfig` — ветка switch.
+   - `getEdgeType` — при необходимости новые связи.
+4. Новая `XxxNode.tsx` + реэкспорт из `nodes/index.ts`.
+5. `nodeTypes` в `GraphCanvas.tsx` — зарегистрировать.
+6. `paletteItems` в `NodePalette.tsx` — добавить карточку.
+7. `PropertiesPanel.tsx` — `XxxFields` + прокинуть в type-dispatch + `<GenerateButton>` если нужна генерация.
+8. `Toolbar.tsx` `generateAgentCode` — добавить dataclass-вывод если язык должен попасть в Python.
 
-`services/treeSitter/loader.ts`:
-- Calls `Parser.init({ locateFile })` once on first use, pointing it at
-  `/grammars/web-tree-sitter.wasm` so the runtime can self-locate.
-- `getLanguage(lang)` fetches the per-language WASM (cached in an
-  IndexedDB store `agent-designer-grammar-cache`), wraps the bytes in a
-  `Uint8Array`, and feeds them to `Parser.Language.load`.
-- `detectAvailableGrammars()` does a HEAD request for each known grammar
-  URL so the UI can label "tree-sitter available" / "regex fallback" without
-  paying the cost of actually loading.
+### 14.2 Добавить новый тип ребра
 
-To add a new language: drop the `.wasm` into `public/grammars/`, list it in
-`LANGUAGE_GRAMMARS` in `scripts/fetch-grammars.cjs`, add a row to `GRAMMARS`
-in `loader.ts` with the file extension list, and (optionally) add extractor
-rules to `tsExtractor.ts`.
+1. `EdgeType` в `src/types/index.ts`.
+2. `getEdgeType` в сторе.
+3. `isValidConnection` в `GraphCanvas.tsx`.
+4. Цвет и `animated` в `onConnect` стора (там же выбирается стиль).
+5. Custom renderer: добавить в `defaultEdgeOptions` `type="yourEdgeType"` и зарегистрировать в `edgeTypes` в `GraphCanvas.tsx`.
 
-### Folder scanner
+### 14.3 Добавить новый tool в Toolbar
 
-`services/treeSitter/folderScanner.ts` walks the picked
-`FileSystemDirectoryHandle` recursively (skipping `node_modules`, `.git`,
-`dist`, `coverage`, …), filters by extension, reads each file via the FS
-Access API, and feeds it to the parser selector. It runs in chunks of 25
-files, yielding to the UI thread between batches and reporting progress
-through `onProgress`. The graph entity store merges results per file so a
-re-scan replaces the previous run cleanly.
+- Добавить кнопку в `Toolbar.tsx`. Если нужны новые поля в сторе — расширить `useGraphStore`.
 
-### Data model
+### 14.4 Добавить новый control в нижнюю правую панель
 
-`CodeGraphSnapshot` (in `codeGraphStore.ts`) holds:
-- `entitiesById`: `Record<string, CodeEntity>` — code-graph nodes.
-- `entitiesByFile`: `Record<string, string[]>` — keeps file→entity mapping
-  so re-scanning a single file is local.
-- `relations`: array of `CodeRelation` (edges like `contains`, `imports`,
-  etc.).
-- `parsedAt`, `rootPath`: metadata.
+- В `GraphCanvas.tsx` в `<Controls>` вставить ещё один `<ControlButton>`. Шаблон — `handleAutoLayout` (использует `useReactFlow().fitView`).
 
-The Zustand `useCodeGraphStore` wraps this snapshot in UI state (phase,
-progress, parserUsed) and persists the snapshot to IndexedDB on every
-`replaceGraph` call so reloading the page doesn't pay the scan cost twice.
+### 14.5 Добавить новый обязательный frontmatter-key в генерации
 
-### Context assembly
+- `instructionGenerator.ts` → `AGENT_EXPECTATIONS.required` или `SKILL_EXPECTATIONS.required`.
+- Шаблон в `templates/*.md` — добавить ключ с примером значения.
+- `buildPromptForNode` — расширить секцию «Required Frontmatter».
+- `<ValidationChip>` подсветит `missing <key>` без дополнительной правки.
 
-`services/treeSitter/contextCollector.ts`:
-- `codeNameCandidates(node)` derives a normalised set of likely code names
-  from the node's label (and `functionName` for skills, or the first
-  meaningful tokens of `instructions` for agents).
-- `collectContextForNode(node, graph)` scores each entity against the
-  candidates (exact match = 10, substring match = 4, plus a small penalty
-  for trivial accessors), takes the top 5, and renders them as a Markdown
-  block with signature, file:line, doc comment, and truncated body in a
-  fenced code block.
+### 14.6 Добавить новый язык в tree-sitter
 
-`buildPromptForNode` in `services/instructionGenerator.ts` now accepts a
-`codeContext` option, which it inserts under `## Project Code Context` —
-above the user request, so Qwen uses it as ground truth, not as a hint.
+1. `scripts/fetch-grammars.cjs` → `LANGUAGE_GRAMMARS` (repo, asset, tag, env-var).
+2. `npm run grammars`.
+3. `services/treeSitter/loader.ts` → `GRAMMARS[<lang>]` (extensions + url).
+4. `tsExtractor.ts` — добавить правила для своего AST (если хочется лучше regex'а).
+5. `regexExtractor.ts` — добавить regex-правила как fallback.
 
-### UI surfaces
+### 14.7 Заменить FS Access API на полноценную VFS
 
-- `src/components/CodeGraphToolbarButton.tsx` — a floating button anchored
-  bottom-left that opens a panel with stats, a `Scan now` action, search,
-  and parser-source indicator (`tree-sitter` vs `regex-fallback`).
-- `src/components/InstructionGeneratorDialog.tsx` — has a third info strip
-  showing total entity count, kind breakdown, and how many entities match
-  the current node.
+- В `services/fileSystem.ts` добавить `IndexedDB`-backed `writeInstructionToDisk` (например, через `idb-keyval`).
+- Старый `writeInstructionToDisk` остаётся fallback'ом.
 
-### Failure modes
+---
 
-| Symptom | Behaviour |
-|---|---|
-| Grammar WASM 404 at `/grammars/*` | `runParserForFile` catches, falls back to `RegexCodeParser`. UI still works; extracted entities are surfaced, just less precisely. |
-| Browser without FS Access | Scan is unavailable (folder walker needs the API). Dialog hides the scan trigger or surfaces a clear error. |
-| File > 1 MiB | Skipped silently to keep the in-memory graph manageable. |
-| Network fail on first load | IndexedDB cache reused on next visit; clear it via DevTools → Application → IndexedDB. |
+## 15. Резюме поведения пользователя
 
+Полный happy-path от пустого холста до готового Python-проекта:
 
+1. Открыть http://localhost:5173.
+2. Перетащить Orchestrator из палитры в центр.
+3. Перетащить Agent — соединить handle снизу orchestrator'а с handle сверху agent'а.
+4. Перетащить Skill — соединить с agent'ом.
+5. Выбрать Agent → в правой панели открыть «Generate instruction with Qwen» → ввести запрос → «Generate» → отредактировать preview → «Save» (выбрать папку проекта через «Pick folder…», или «Save & download»).
+6. Повторить для остальных нод.
+7. Toolbar → Auto-layout (`Workflow` иконка) — граф выстроится.
+8. Toolbar → Export — скачать JSON проекта.
+9. Toolbar → Generate Code — скачать `*_agents.py` для Python runtime.
+
+Опционально (если в папке проекта есть код):
+10. Кнопка «Code graph» (bottom-left) → «Scan now» — собирает граф кода. Дальнейшие генерации инструкций используют этот контекст.
