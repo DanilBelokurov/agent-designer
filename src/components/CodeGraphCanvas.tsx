@@ -176,6 +176,10 @@ function layoutWithDagre(
     /** Skip laying out nodes that belong to collapsed parents — they
      *  won't be in `nodes` anyway, so dagre doesn't need their position. */
     isCollapsedParent?: (id: string) => boolean;
+    /** Set of entity ids that will actually become flow nodes. Used to
+     *  skip `setParent` for parents that aren't rendered (e.g. file
+     *  entities) so dagre doesn't error out. */
+    renderedIds?: ReadonlySet<string>;
   } = {},
 ): LayoutResult {
   const g = new dagre.graphlib.Graph({ multigraph: true, compound: true });
@@ -207,9 +211,11 @@ function layoutWithDagre(
       height: isContainer ? COMPOUND_H : STANDALONE_H,
     });
     if (e.parentId) {
-      const parentVisible = entityById.has(e.parentId) &&
-        !options.isCollapsedParent?.(e.parentId);
-      if (parentVisible) {
+      const parentWillRender = options.renderedIds
+        ? options.renderedIds.has(e.parentId)
+        : entityById.has(e.parentId);
+      const parentNotCollapsed = !options.isCollapsedParent?.(e.parentId);
+      if (parentWillRender && parentNotCollapsed) {
         try { g.setParent(id, e.parentId); } catch { /* ignore */ }
       }
     }
@@ -336,8 +342,21 @@ export default function CodeGraphCanvas() {
       filtered.entities, filtered.relations, collapsedSet,
     );
     const t2 = performance.now();
+
+    // Build the set of ids that will actually be rendered as flow nodes.
+    // Used both for dagre's parent-child wiring and for ReactFlow's
+    // `parentNode` — both need to point at a node that's actually in
+    // the nodes array (file entities are filtered out below).
+    const renderedIds = new Set<string>();
+    for (const e of visible) {
+      if (e.kind !== 'file' && e.kind !== 'unknown') renderedIds.add(e.id);
+    }
+
     const isCollapsed = (id: string) => collapsedSet.has(id);
-    const { positions } = layoutWithDagre(visible, visibleRelations, { isCollapsedParent: isCollapsed });
+    const { positions } = layoutWithDagre(visible, visibleRelations, {
+      isCollapsedParent: isCollapsed,
+      renderedIds,
+    });
     const t3 = performance.now();
 
     // Compute visible-child-count per container for the badge.
@@ -348,39 +367,42 @@ export default function CodeGraphCanvas() {
       }
     }
 
-    const flowNodes: Node<EntityNodeData>[] = visible
-      .filter((e) => e.kind !== 'file' && e.kind !== 'unknown')
-      .map((e) => {
-        const isContainer = CONTAINER_KINDS.has(e.kind);
-        const parentId = e.parentId ?? null;
-        const inContainer = parentId !== null;
-        const collapsed = isContainer && collapsedSet.has(e.id);
-        const pos = positions.get(e.id) ?? { x: 0, y: 0 };
-        const color = KIND_COLORS[e.kind] ?? FALLBACK_STYLE;
-        const kids = childCount.get(e.id) ?? 0;
-        return {
-          id: e.id,
-          type: 'entity',
-          position: pos,
-          data: { entity: e, color, compound: inContainer, collapsed },
-          draggable: false,
-          selectable: true,
-          ...(inContainer
-            ? { parentNode: parentId!, extent: 'parent' as const }
-            : {}),
-          ...(isContainer
-            ? {
-                style: {
-                  width: collapsed ? COMPOUND_W : COMPOUND_W + 80,
-                  height: collapsed ? COMPOUND_H : COMPOUND_H + Math.ceil(kids / 2) * (CHILD_H + 8),
-                  padding: 0,
-                  background: 'transparent',
-                  border: 'none',
-                },
-              }
-            : {}),
-        };
+    const flowNodes: Node<EntityNodeData>[] = [];
+    for (const e of visible) {
+      if (e.kind === 'file' || e.kind === 'unknown') continue;
+      const isContainer = CONTAINER_KINDS.has(e.kind);
+      const parentId = e.parentId ?? null;
+      // Only attach to a parent if that parent is actually in the
+      // nodes array we hand to ReactFlow — otherwise ReactFlow throws
+      // "Parent node … not found".
+      const parentWillRender = parentId !== null && renderedIds.has(parentId);
+      const collapsed = isContainer && collapsedSet.has(e.id);
+      const pos = positions.get(e.id) ?? { x: 0, y: 0 };
+      const color = KIND_COLORS[e.kind] ?? FALLBACK_STYLE;
+      const kids = childCount.get(e.id) ?? 0;
+      flowNodes.push({
+        id: e.id,
+        type: 'entity',
+        position: pos,
+        data: { entity: e, color, compound: parentWillRender, collapsed },
+        draggable: false,
+        selectable: true,
+        ...(parentWillRender
+          ? { parentNode: parentId!, extent: 'parent' as const }
+          : {}),
+        ...(isContainer
+          ? {
+              style: {
+                width: collapsed ? COMPOUND_W : COMPOUND_W + 80,
+                height: collapsed ? COMPOUND_H : COMPOUND_H + Math.ceil(kids / 2) * (CHILD_H + 8),
+                padding: 0,
+                background: 'transparent',
+                border: 'none',
+              },
+            }
+          : {}),
       });
+    }
 
     const flowEdges: Edge[] = visibleRelations.map((r) => {
       const style = RELATION_STYLE[r.kind] ?? { color: '#64748b', strokeWidth: 1.5 };
