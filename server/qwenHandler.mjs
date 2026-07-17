@@ -31,20 +31,34 @@ function readBody(req) {
   });
 }
 
-function runQwen(prompt) {
+function runQwen(prompt, model) {
   const command = process.env.QWEN_COMMAND || DEFAULT_QWEN_COMMAND;
   const timeoutMs = Number(process.env.QWEN_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS;
+  const args = ['-p', prompt];
+  if (model && typeof model === 'string' && model.trim()) {
+    args.push('-m', model.trim());
+  }
+  const startedAt = Date.now();
+  console.log(`[qwen] spawn ${command} model=${model ?? '(default)'} promptBytes=${Buffer.byteLength(prompt, 'utf8')}`);
   return new Promise((resolve) => {
     let settled = false;
     const finish = (payload) => {
       if (settled) return;
       settled = true;
+      const ms = Date.now() - startedAt;
+      console.log(
+        `[qwen] exit code=${payload.code ?? 'null'} ` +
+        `timedOut=${!!payload.timedOut} ` +
+        `stdoutBytes=${Buffer.byteLength(payload.stdout || '', 'utf8')} ` +
+        `stderr=${(payload.stderr || '').slice(0, 200).replace(/\n/g, ' ')} ` +
+        `elapsed=${ms}ms`,
+      );
       resolve(payload);
     };
 
     let child;
     try {
-      child = spawn(command, ['-p', prompt], {
+      child = spawn(command, args, {
         stdio: ['ignore', 'pipe', 'pipe'],
         shell: process.platform === 'win32',
         env: process.env,
@@ -112,10 +126,12 @@ export async function handleGenerate(req, res) {
   if (req.method !== 'POST') return false;
 
   let prompt;
+  let model;
   try {
     const raw = await readBody(req);
     const parsed = JSON.parse(raw);
     prompt = parsed && typeof parsed.prompt === 'string' ? parsed.prompt : null;
+    model = parsed && typeof parsed.model === 'string' ? parsed.model : null;
   } catch (err) {
     jsonResponse(res, 400, { error: `bad request: ${err.message ?? String(err)}` });
     return true;
@@ -126,7 +142,7 @@ export async function handleGenerate(req, res) {
     return true;
   }
 
-  const result = await runQwen(prompt);
+  const result = await runQwen(prompt, model);
 
   if (result.spawnError) {
     jsonResponse(res, 502, {

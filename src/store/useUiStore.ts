@@ -5,8 +5,9 @@
 
 import { create } from 'zustand';
 import type { EntityKind, RelationKind } from '../services/codeIntel/types';
+import { logger } from '../services/logger';
 
-export type LeftTab = 'harness' | 'graph';
+export type LeftTab = 'harness' | 'graph' | 'logs';
 
 export interface GraphFilters {
   kinds: Set<EntityKind>;
@@ -54,20 +55,34 @@ export const useUiStore = create<UiState>((set) => ({
   leftTab: 'harness',
   graphFilters: DEFAULT_FILTERS,
 
-  setLeftTab: (tab) => set({ leftTab: tab }),
+  setLeftTab: (tab) => {
+    logger.info('ui.tab.switch', { tab });
+    set({ leftTab: tab });
+  },
   resetToHarness: () => set({ leftTab: 'harness' }),
 
-  toggleFilterKind: (kind) =>
-    set((s) => ({ graphFilters: { ...s.graphFilters, kinds: toggleSet(s.graphFilters.kinds, kind) } })),
-  toggleFilterRelation: (rel) =>
-    set((s) => ({ graphFilters: { ...s.graphFilters, relations: toggleSet(s.graphFilters.relations, rel) } })),
-  toggleFilterLanguage: (language) =>
-    set((s) => ({ graphFilters: { ...s.graphFilters, languages: toggleSet(s.graphFilters.languages, language) } })),
-  toggleFilterArchetype: (archetype) =>
-    set((s) => ({ graphFilters: { ...s.graphFilters, archetypes: toggleSet(s.graphFilters.archetypes, archetype) } })),
+  toggleFilterKind: (kind) => {
+    logger.info('filter.toggle', { group: 'kind', value: kind });
+    set((s) => ({ graphFilters: { ...s.graphFilters, kinds: toggleSet(s.graphFilters.kinds, kind) } }));
+  },
+  toggleFilterRelation: (rel) => {
+    logger.info('filter.toggle', { group: 'relation', value: rel });
+    set((s) => ({ graphFilters: { ...s.graphFilters, relations: toggleSet(s.graphFilters.relations, rel) } }));
+  },
+  toggleFilterLanguage: (language) => {
+    logger.info('filter.toggle', { group: 'language', value: language });
+    set((s) => ({ graphFilters: { ...s.graphFilters, languages: toggleSet(s.graphFilters.languages, language) } }));
+  },
+  toggleFilterArchetype: (archetype) => {
+    logger.info('filter.toggle', { group: 'archetype', value: archetype });
+    set((s) => ({ graphFilters: { ...s.graphFilters, archetypes: toggleSet(s.graphFilters.archetypes, archetype) } }));
+  },
   setFilterLanguages: (languages) =>
     set((s) => ({ graphFilters: { ...s.graphFilters, languages: new Set(languages) } })),
-  resetFilters: () => set({ graphFilters: DEFAULT_FILTERS }),
+  resetFilters: () => {
+    logger.info('filter.reset');
+    set({ graphFilters: DEFAULT_FILTERS });
+  },
 }));
 
 export const ALL_KINDS: ReadonlyArray<EntityKind> = [

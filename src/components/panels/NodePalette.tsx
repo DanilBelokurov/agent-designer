@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import type { NodeType } from '../../types';
-import { Sparkles, Bot, Wrench, GripVertical, ChevronLeft, ChevronRight, Code2 } from 'lucide-react';
+import { Sparkles, Bot, Wrench, GripVertical, ChevronLeft, ChevronRight, Code2, ScrollText } from 'lucide-react';
 import { useUiStore, type LeftTab } from '../../store/useUiStore';
 import CodeGraphViewPanel from './CodeGraphViewPanel';
+import LogsViewPanel from './LogsViewPanel';
 
 interface NodePaletteProps {
   onDragStart: (event: React.DragEvent, nodeType: NodeType) => void;
@@ -51,6 +52,7 @@ const paletteItems: PaletteItem[] = [
 const TABS: Array<{ key: LeftTab; label: string; icon: React.ReactNode }> = [
   { key: 'harness', label: 'Harness', icon: <Sparkles className="w-3.5 h-3.5" /> },
   { key: 'graph', label: 'Graph', icon: <Code2 className="w-3.5 h-3.5" /> },
+  { key: 'logs', label: 'Logs', icon: <ScrollText className="w-3.5 h-3.5" /> },
 ];
 
 const NodePalette = ({ onDragStart }: NodePaletteProps) => {
@@ -235,8 +237,10 @@ const NodePalette = ({ onDragStart }: NodePaletteProps) => {
               </div>
             </div>
           </>
-        ) : (
+        ) : leftTab === 'graph' ? (
           <CodeGraphViewPanel />
+        ) : (
+          <LogsViewPanel />
         )}
       </div>
     </div>

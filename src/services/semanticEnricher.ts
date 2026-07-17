@@ -222,6 +222,7 @@ export async function enrichEntity(entity: CodeEntity): Promise<SemanticInfo> {
 export async function enrichEntityContext(
   entity: CodeEntity,
   state: AgentState | null,
+  options: { model?: string } = {},
 ): Promise<SemanticInfo> {
   const cached = await semanticCache.get(entity.id);
   // We only reuse the cache if it already has the contextual fields —
@@ -236,7 +237,7 @@ export async function enrichEntityContext(
   const prompt = buildContextualPrompt(entity, state, ctx);
   let raw: string;
   try {
-    raw = await generateViaQwen(prompt);
+    raw = await generateViaQwen(prompt, { model: options.model });
   } catch (err) {
     const reason = err instanceof QwenUnavailableError ? err.message : `qwen call failed: ${String(err)}`;
     const fallback = fallbackInfo(entity.id, reason);
@@ -267,12 +268,13 @@ export async function enrichEntitiesContext(
   entities: CodeEntity[],
   state: AgentState,
   onProgress?: (current: number, total: number, entityName: string, info: SemanticInfo) => void,
+  options: { model?: string } = {},
 ): Promise<Array<{ entity: CodeEntity; info: SemanticInfo }>> {
   const out: Array<{ entity: CodeEntity; info: SemanticInfo }> = [];
   for (let i = 0; i < entities.length; i++) {
     const e = entities[i];
     // eslint-disable-next-line no-await-in-loop
-    const info = await enrichEntityContext(e, state);
+    const info = await enrichEntityContext(e, state, options);
     out.push({ entity: e, info });
     onProgress?.(i + 1, entities.length, e.name, info);
   }

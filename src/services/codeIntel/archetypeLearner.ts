@@ -183,9 +183,11 @@ export async function learnArchetypes(args: {
   index: ProjectArchetypeIndex;
   /** Existing rules keyed by `${projectFingerprint}|${packageSig}` — bypass Qwen when found. */
   cache?: Map<string, PackageArchetypeRule[]>;
+  /** Qwen model id forwarded to generateViaQwen. */
+  model?: string;
   onProgress?: (current: number, total: number, pkg: string) => void;
 }): Promise<{ usedFallback: boolean }> {
-  const { groups, index, cache, onProgress } = args;
+  const { groups, index, cache, model, onProgress } = args;
 
   let usedFallback = false;
   index.rulesByPackage = index.rulesByPackage ?? {};
@@ -207,7 +209,7 @@ export async function learnArchetypes(args: {
         if (samples.length === 0) continue;
         const prompt = buildPrompt(g, samples.length);
         const raw = await Promise.race([
-          generateViaQwen(prompt),
+          generateViaQwen(prompt, { model }),
           new Promise<string>((_r, rej) => setTimeout(() => rej(new Error('timeout')), REQUEST_TIMEOUT_MS)),
         ]);
         const assignments = parseAssignments(raw);

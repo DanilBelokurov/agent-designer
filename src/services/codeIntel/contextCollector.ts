@@ -77,6 +77,8 @@ export interface CollectOptions {
   enrichPoolSize?: number;
   /** Skip the enrichment step entirely (uses stored semantic fields or none). */
   skipEnrich?: boolean;
+  /** Qwen model id forwarded to enrichEntityContext. */
+  model?: string;
   onProgress?: (current: number, total: number, entityName: string, info: SemanticInfo) => void;
 }
 
@@ -182,7 +184,7 @@ export async function collectContextForNode(
           timestamp: 0,
         } satisfies SemanticInfo,
       }))
-    : await enrichEntitiesContext(entities, state, options.onProgress);
+    : await enrichEntitiesContext(entities, state, options.onProgress, { model: options.model });
 
   // Re-rank: bump entities that survived enrichment with a recognised role
   // and have a non-empty description.

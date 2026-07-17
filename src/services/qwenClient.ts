@@ -4,6 +4,8 @@
 // `serverUrl` option is still accepted in case you want to point at a
 // standalone bridge running elsewhere.
 
+import { logger } from './logger';
+
 const DEFAULT_SERVER_URL = '';
 
 export class QwenUnavailableError extends Error {
@@ -19,6 +21,8 @@ export interface QwenClientOptions {
   /** Override the target. Empty string (default) means same-origin. */
   serverUrl?: string;
   signal?: AbortSignal;
+  /** Qwen model id (e.g. 'qwen2.5-coder:32b'). Forwarded as `-m` to the CLI. */
+  model?: string;
 }
 
 function bridgeUrl(path: string, serverUrl: string): string {
@@ -31,16 +35,23 @@ export async function generateViaQwen(
   options: QwenClientOptions = {},
 ): Promise<string> {
   const serverUrl = options.serverUrl ?? DEFAULT_SERVER_URL;
+  const promptBytes = new Blob([prompt]).size;
+  logger.info('qwen.call', {
+    model: options.model ?? '(default)',
+    promptBytes,
+    promptPreview: prompt.slice(0, 120),
+  });
 
   let res: Response;
   try {
     res = await fetch(bridgeUrl('/generate', serverUrl), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({ prompt, model: options.model }),
       signal: options.signal,
     });
-  } catch {
+  } catch (err) {
+    logger.error('qwen.network', { message: err instanceof Error ? err.message : String(err) });
     throw new QwenUnavailableError(
       `Cannot reach the qwen bridge. ` +
         `Make sure the dev server or prod server is running and Qwen CLI is installed.`,
@@ -55,13 +66,22 @@ export async function generateViaQwen(
   }
 
   if (!res.ok || data.error) {
+    logger.warn('qwen.failed', {
+      status: res.status,
+      error: data.error || `HTTP ${res.status}`,
+    });
     throw new QwenUnavailableError(
       data.error || `qwen bridge returned HTTP ${res.status}`,
       res.status,
     );
   }
 
-  return (data.result ?? '').trim();
+  const result = (data.result ?? '').trim();
+  logger.debug('qwen.response', {
+    bytes: new Blob([result]).size,
+    preview: result.slice(0, 120),
+  });
+  return result;
 }
 
 export async function checkHealth(

@@ -17,6 +17,7 @@ import { staticArchetypeForFile } from './architecture';
 import { groupFilesByPackage, learnArchetypes, MANIFEST_NAMES, projectFingerprintFor } from './archetypeLearner';
 import { detectConventions, type ConventionsInput } from './conventions';
 import { loadAgentState, saveAgentState } from './stateIO';
+import { logger } from '../logger';
 
 export interface AnalyzeProgress {
   phase: 'reading' | 'extracting' | 'archetyping' | 'conventions' | 'saving' | 'done';
@@ -30,6 +31,8 @@ export interface AnalyzeOptions {
   relearnArchetypes?: boolean;
   skipArchetypes?: boolean;
   skipConventions?: boolean;
+  /** Qwen model id to use for archetype learning. */
+  model?: string;
   onProgress?: (p: AnalyzeProgress) => void;
   abort?: AbortSignal;
 }
@@ -177,6 +180,13 @@ export async function analyzeProject(
     ? { ...existing.archetypes, projectFingerprint: fp }
     : { projectFingerprint: fp, rulesByPackage: {}, fileAssignment: {} };
 
+  logger.info('analyze.start', {
+    directory: dir.name,
+    fingerprint: fp,
+    cacheHit,
+    manifests: fingerprints,
+  });
+
   onProgress?.({ phase: 'reading', current: 0, total: 1 });
 
   // Walk files, parse new/changed ones
@@ -235,6 +245,7 @@ export async function analyzeProject(
       groups,
       index: archetypes,
       cache: cacheMap,
+      model: options.model,
       onProgress: (current, total, pkg) => {
         onProgress?.({ phase: 'archetyping', current, total, detail: pkg });
       },
@@ -296,6 +307,13 @@ export async function analyzeProject(
 
   onProgress?.({ phase: 'saving', current: 0, total: 1, detail: 'persisting state.json' });
   await saveAgentState(dir, state);
+  logger.info('analyze.done', {
+    entities: state.entities.length,
+    relations: state.relations.length,
+    scanned: stats.scanned,
+    matched: stats.matched,
+    errors: stats.errors,
+  });
   onProgress?.({ phase: 'done', current: 1, total: 1 });
 
   return { state, usedFallback: false, cacheHit };

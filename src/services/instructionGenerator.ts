@@ -203,6 +203,8 @@ interface BuildPromptInput {
   downstreamSummary?: string;
   /** Code-intel `AgentState` — when provided, the relevant entities are enriched via Qwen and rendered into the prompt. */
   codeState?: AgentState | null;
+  /** Qwen model id forwarded to the enrichment call. */
+  model?: string;
   /**
    * Skip the live enrichment step and reuse this Markdown verbatim under
    * "Project Code Context". Useful for testing or when callers already
@@ -281,6 +283,7 @@ export async function buildPromptForNode(
   } else if (input.codeState && input.codeState.entities.length > 0) {
     const collected = await collectContextForNode(node, input.codeState, {
       enrichPoolSize: input.enrichPoolSize,
+      model: input.model,
       onProgress: input.onEnrichmentProgress,
     });
     collectedEntityCount = collected.entityCount;

@@ -19,6 +19,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dispatchBridge } from './qwenHandler.mjs';
+import { dispatchLog, LOG_PATHS } from './logHandler.mjs';
 
 const PORT = Number(process.env.PORT) || 3001;
 const HOST = process.env.HOST || '127.0.0.1';
@@ -89,6 +90,9 @@ const server = createServer(async (req, res) => {
     const handled = await dispatchBridge(req, res, urlPath);
     if (handled) return;
 
+    const logged = await dispatchLog(req, res, urlPath);
+    if (logged) return;
+
     await serveStatic(urlPath, res);
   } catch (err) {
     if (!res.headersSent) {
@@ -108,6 +112,7 @@ server.listen(PORT, HOST, () => {
   console.log(`  dist root:    ${DIST}`);
   console.log(`  qwen command: ${cmd}`);
   console.log(`  qwen timeout: ${Number(process.env.QWEN_TIMEOUT_MS) || 120_000}ms`);
+  console.log(`  log file:     ${LOG_PATHS.LOG_FILE}`);
 });
 
 const shutdown = () => {

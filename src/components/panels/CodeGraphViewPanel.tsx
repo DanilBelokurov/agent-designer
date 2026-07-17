@@ -1,9 +1,9 @@
-// Left-panel body for the "Graph" tab. Owns scan controls, parser/cache
-// indicators, search, and per-kind stats. Lives inside NodePalette —
-// switched in by `useUiStore.leftTab`.
+// Left-panel body for the "Graph" tab. Owns scan controls, model picker,
+// parser/cache indicators, search, and per-kind stats. Lives inside
+// NodePalette — switched in by `useUiStore.leftTab`.
 
-import { useState, useMemo } from 'react';
-import { Loader2, Play, RotateCcw, FileSearch, Trash2, Filter } from 'lucide-react';
+import { useEffect, useState, useMemo } from 'react';
+import { Loader2, Play, RotateCcw, FileSearch, Trash2, Filter, Cpu } from 'lucide-react';
 import { useFileSystemStore } from '../../store/useFileSystemStore';
 import {
   useCodeGraphStore,
@@ -19,6 +19,8 @@ import {
 import { analyzeProject, type AnalyzeProgress } from '../../services/codeIntel/layer';
 import { pickProjectDirectory } from '../../services/fileSystem';
 import { semanticCache } from '../../services/semanticCache';
+import { loadConfig, defaultModel, type AppConfig, type ModelInfo } from '../../services/config';
+import { logger } from '../../services/logger';
 
 function toProgressSnapshot(p: AnalyzeProgress) {
   return {
@@ -52,9 +54,33 @@ export default function CodeGraphViewPanel() {
   const reset = useCodeGraphStore((s) => s.reset);
 
   const [search, setSearch] = useState('');
+  const [config, setConfig] = useState<AppConfig | null>(null);
+  const [selectedModel, setSelectedModel] = useState<string>('');
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const cfg = await loadConfig();
+      if (!alive) return;
+      setConfig(cfg);
+      const stored = localStorage.getItem('agent-designer:selectedModel');
+      const initial = stored && cfg.models.some((m) => m.id === stored)
+        ? stored
+        : defaultModel(cfg).id;
+      setSelectedModel(initial);
+      logger.info('config.loaded', { models: cfg.models.length, selected: initial });
+    })();
+    return () => { alive = false; };
+  }, []);
+
   const stats = describeGraph(state);
 
   const beginScan = async () => {
+    logger.info('scan.start', {
+      directory: directory?.name ?? null,
+      model: selectedModel,
+      cacheHitBefore: cacheHit,
+    });
     let dir = directory;
     if (!dir) {
       try {
@@ -62,8 +88,11 @@ export default function CodeGraphViewPanel() {
         const ok = await dir.verifyWritable();
         if (!ok) throw new Error('folder not writable');
         setDirectory(dir);
+        logger.info('scan.directoryPicked', { name: dir.name });
       } catch (e) {
-        setPhase('error', e instanceof Error ? e.message : String(e));
+        const msg = e instanceof Error ? e.message : String(e);
+        logger.error('scan.directoryFailed', { message: msg });
+        setPhase('error', msg);
         return;
       }
     }
@@ -71,15 +100,32 @@ export default function CodeGraphViewPanel() {
     setProgress({ phase: 'reading', current: 0, total: 0, scanned: 0, matched: 0, errors: 0 });
     try {
       const result = await analyzeProject(dir, {
+        model: selectedModel || undefined,
         onProgress: (p) => setProgress(toProgressSnapshot(p)),
+      });
+      logger.info('scan.done', {
+        entities: result.state.entities.length,
+        relations: result.state.relations.length,
+        cacheHit: result.cacheHit,
       });
       await replaceState(result.state);
       setParser('code-intel');
       setCacheHit(result.cacheHit);
       setPhase('done');
     } catch (e) {
-      setPhase('error', e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      logger.error('scan.failed', { message: msg });
+      setPhase('error', msg);
     }
+  };
+
+  const clearState = () => {
+    logger.info('state.clear', { entities: stats.totalEntities });
+    void (async () => {
+      await semanticCache.flush();
+      await semanticCache.clear();
+      await reset();
+    })();
   };
 
   const matches = search.trim()
@@ -138,6 +184,16 @@ export default function CodeGraphViewPanel() {
 
       {/* Actions */}
       <div className="space-y-2">
+        <ModelPicker
+          models={config?.models ?? []}
+          value={selectedModel}
+          onChange={(id) => {
+            logger.info('model.change', { from: selectedModel, to: id });
+            setSelectedModel(id);
+            localStorage.setItem('agent-designer:selectedModel', id);
+          }}
+          disabled={phase === 'scanning'}
+        />
         <button
           type="button"
           onClick={beginScan}
@@ -163,13 +219,7 @@ export default function CodeGraphViewPanel() {
         </button>
         <button
           type="button"
-          onClick={() => {
-            void (async () => {
-              await semanticCache.flush();
-              await semanticCache.clear();
-              await reset();
-            })();
-          }}
+          onClick={clearState}
           disabled={stats.totalEntities === 0}
           className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-slate-700/50 bg-slate-800/40 text-slate-300 hover:text-white text-sm disabled:opacity-40"
         >
@@ -249,6 +299,41 @@ export default function CodeGraphViewPanel() {
       </div>
 
       <FiltersPanel state={state} />
+    </div>
+  );
+}
+
+function ModelPicker({
+  models,
+  value,
+  onChange,
+  disabled,
+}: {
+  models: ModelInfo[];
+  value: string;
+  onChange: (id: string) => void;
+  disabled: boolean;
+}) {
+  if (!models.length) {
+    return (
+      <div className="text-[10px] text-slate-500 italic">
+        Loading models…
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <Cpu className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className="flex-1 px-2 py-1.5 text-xs bg-slate-800/60 border border-slate-700/50 rounded text-white focus:outline-none focus:ring-1 focus:ring-emerald-500/50 disabled:opacity-50"
+      >
+        {models.map((m) => (
+          <option key={m.id} value={m.id}>{m.label} ({m.id})</option>
+        ))}
+      </select>
     </div>
   );
 }

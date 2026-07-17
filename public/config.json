@@ -1,0 +1,10 @@
+{
+  "models": [
+    { "id": "qwen2.5-coder:7b", "label": "Qwen 2.5 Coder 7B", "default": true },
+    { "id": "qwen2.5-coder:32b", "label": "Qwen 2.5 Coder 32B" },
+    { "id": "qwen2.5:72b", "label": "Qwen 2.5 72B" },
+    { "id": "qwen-max", "label": "Qwen Max" },
+    { "id": "qwen-plus", "label": "Qwen Plus" },
+    { "id": "qwen-turbo", "label": "Qwen Turbo" }
+  ]
+}
