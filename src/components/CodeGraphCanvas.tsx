@@ -517,7 +517,7 @@ export default function CodeGraphCanvas() {
       >
         <Background color="#1e293b" gap={20} size={1} />
         <Controls
-          position="bottom-right"
+          position="bottom-left"
           showInteractive={false}
           className="!bg-slate-900/90 !border-slate-700/50 !shadow-2xl !rounded-xl overflow-hidden"
         >
@@ -629,7 +629,7 @@ function StatusBar({
   visible, containers, collapsed,
 }: { visible: number; containers: number; collapsed: number }) {
   return (
-    <div className="absolute bottom-4 left-4 z-20 px-3 py-1.5 rounded-lg bg-slate-900/70 border border-slate-700/50 backdrop-blur-md text-[10px] uppercase tracking-widest text-slate-300 pointer-events-none flex items-center gap-3">
+    <div className="absolute top-4 left-4 z-20 px-3 py-1.5 rounded-lg bg-slate-900/70 border border-slate-700/50 backdrop-blur-md text-[10px] uppercase tracking-widest text-slate-300 pointer-events-none flex items-center gap-3">
       <span><b className="text-white">{visible}</b> visible</span>
       <span className="text-slate-600">·</span>
       <span><b className="text-white">{containers}</b> containers</span>
