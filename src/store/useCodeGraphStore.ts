@@ -1,140 +1,224 @@
-// UI store for the code-graph feature. Holds a snapshot of the graph
-// (entities + relations), scan status, and cached metadata. Persists the
-// snapshot to IndexedDB so reloads after a scan don't pay the cost twice.
+// UI store for the code-intel feature. Holds an `AgentState` (entities +
+// relations + archetypes + conventions + semantic + stats), scan status, and
+// last-known cache-hit flag.
+//
+// Persistence: `.agent-graph/state.json` inside the picked project folder,
+// written atomically via `codeIntel/stateIO`. The store binds to a
+// directory through `setDirectory(dir)`: when the user picks / switches /
+// clears the folder, the in-memory state is rehydrated from disk (or
+// wiped). Writes go through `replaceState`, which persists synchronously
+// after each scan completes.
 
 import { create } from 'zustand';
-import type { CodeEntity } from '../services/treeSitter/codeGraph';
-import type { CodeGraphSnapshot } from '../services/treeSitter/codeGraphStore';
+import type { ProjectDirectory } from '../services/fileSystem';
+import type {
+  AgentState,
+  CodeEntity,
+  CodeRelation,
+  EntityKind,
+} from '../services/codeIntel/types';
 import {
-  clearGraph as resetGraph,
-  entitiesByKind,
-  entitiesByLanguage,
-  makeEmptyGraph,
-} from '../services/treeSitter/codeGraphStore';
-
-const DB_NAME = 'agent-designer-code-graph';
-const DB_VERSION = 1;
-const STORE = 'snapshots';
-const SNAPSHOT_KEY = 'latest';
-
-async function loadSnapshot(): Promise<CodeGraphSnapshot | null> {
-  if (typeof indexedDB === 'undefined') return null;
-  try {
-    const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const req = indexedDB.open(DB_NAME, DB_VERSION);
-      req.onupgradeneeded = () => {
-        const d = req.result;
-        if (!d.objectStoreNames.contains(STORE)) d.createObjectStore(STORE);
-      };
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-    });
-    return await new Promise<CodeGraphSnapshot | null>((resolve, reject) => {
-      const tx = db.transaction(STORE, 'readonly');
-      const req = tx.objectStore(STORE).get(SNAPSHOT_KEY);
-      req.onsuccess = () => resolve((req.result as CodeGraphSnapshot) ?? null);
-      req.onerror = () => reject(req.error);
-    });
-  } catch {
-    return null;
-  }
-}
-
-async function saveSnapshot(s: CodeGraphSnapshot): Promise<void> {
-  if (typeof indexedDB === 'undefined') return;
-  try {
-    const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const req = indexedDB.open(DB_NAME, DB_VERSION);
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-    });
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE, 'readwrite');
-      tx.objectStore(STORE).put(s, SNAPSHOT_KEY);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch {
-    /* ignore */
-  }
-}
+  clearAgentState,
+  loadAgentState,
+  saveAgentState,
+} from '../services/codeIntel/stateIO';
 
 export type ScanPhase = 'idle' | 'scanning' | 'done' | 'error' | 'cancelled';
 
-interface CodeGraphUIState {
-  graph: CodeGraphSnapshot;
-  phase: ScanPhase;
-  error: string | null;
-  progress: { scanned: number; matched: number; skipped: number; errors: number; currentFile?: string };
-  parserUsed: 'tree-sitter' | 'regex-fallback' | 'mixed' | null;
-
-  setProgress: (p: CodeGraphUIState['progress']) => void;
-  setPhase: (p: ScanPhase, error?: string | null) => void;
-  setParserUsed: (k: CodeGraphUIState['parserUsed']) => void;
-  replaceGraph: (next: CodeGraphSnapshot) => Promise<void>;
-  reset: () => Promise<void>;
+export interface ScanProgressSnapshot {
+  phase: 'reading' | 'extracting' | 'archetyping' | 'conventions' | 'saving' | 'done';
+  current: number;
+  total: number;
+  detail?: string;
+  /** Convenience counter — files seen so far. */
+  scanned: number;
+  /** Convenience counter — files actually parsed. */
+  matched: number;
+  errors: number;
+  /** Best-effort current file path. */
+  currentFile?: string;
 }
 
+interface CodeGraphUIState {
+  state: AgentState | null;
+  phase: ScanPhase;
+  error: string | null;
+  progress: ScanProgressSnapshot;
+  /** Always `code-intel` once a scan has produced a result. */
+  parser: 'code-intel' | null;
+  /** True if the last load/analyze reused a previously persisted AgentState. */
+  cacheHit: boolean | null;
+
+  setProgress: (p: ScanProgressSnapshot) => void;
+  setPhase: (p: ScanPhase, error?: string | null) => void;
+  setParser: (k: CodeGraphUIState['parser']) => void;
+  setCacheHit: (v: boolean | null) => void;
+
+  /** Replace the state and persist atomically to state.json. */
+  replaceState: (next: AgentState) => Promise<void>;
+  /** Wipe in-memory state and the on-disk `.agent-graph/state.json`. */
+  reset: () => Promise<void>;
+  /**
+   * Bind the store to a directory. Reads state.json if present. Pass null
+   * to clear the binding (without wiping on disk).
+   */
+  setDirectory: (dir: ProjectDirectory | null) => Promise<void>;
+}
+
+const EMPTY_PROGRESS: ScanProgressSnapshot = {
+  phase: 'reading',
+  current: 0,
+  total: 0,
+  scanned: 0,
+  matched: 0,
+  errors: 0,
+};
+
 export const useCodeGraphStore = create<CodeGraphUIState>((set) => ({
-  graph: makeEmptyGraph(),
+  state: null,
   phase: 'idle',
   error: null,
-  progress: { scanned: 0, matched: 0, skipped: 0, errors: 0 },
-  parserUsed: null,
+  progress: EMPTY_PROGRESS,
+  parser: null,
+  cacheHit: null,
 
   setProgress: (p) => set({ progress: p }),
   setPhase: (p, error = null) => set({ phase: p, error }),
-  setParserUsed: (k) => set({ parserUsed: k }),
+  setParser: (k) => set({ parser: k }),
+  setCacheHit: (v) => set({ cacheHit: v }),
 
-  replaceGraph: async (next) => {
-    set({ graph: next });
-    await saveSnapshot(next);
+  replaceState: async (next) => {
+    set({ state: next });
+    const dir = currentDir();
+    if (dir) {
+      try {
+        await saveAgentState(dir, next);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[useCodeGraphStore] saveAgentState failed:', err);
+      }
+    }
   },
 
   reset: async () => {
-    const empty = makeEmptyGraph();
-    resetGraph(empty);
     set({
-      graph: empty,
+      state: null,
       phase: 'idle',
       error: null,
-      progress: { scanned: 0, matched: 0, skipped: 0, errors: 0 },
-      parserUsed: null,
+      progress: EMPTY_PROGRESS,
+      parser: null,
+      cacheHit: null,
     });
+    const dir = currentDir();
+    if (dir) {
+      try {
+        await clearAgentState(dir);
+      } catch {
+        // ignore — directory may already be cleared
+      }
+    }
+  },
+
+  setDirectory: async (dir) => {
+    set({
+      state: null,
+      phase: 'idle',
+      error: null,
+      progress: EMPTY_PROGRESS,
+      parser: null,
+      cacheHit: null,
+    });
+    setCurrentDir(dir);
+    if (!dir) return;
+    try {
+      const loaded = await loadAgentState(dir);
+      if (loaded) {
+        set({ state: loaded, cacheHit: true });
+      } else {
+        set({ cacheHit: false });
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[useCodeGraphStore] loadAgentState failed:', err);
+      set({ cacheHit: false });
+    }
   },
 }));
 
-/** Hydrate the store from IndexedDB on app start. Call once on mount. */
-export async function hydrateCodeGraphStore(): Promise<void> {
-  const snap = await loadSnapshot();
-  if (snap) {
-    useCodeGraphStore.setState({ graph: snap });
-  }
+// --- directory binding (module-scoped) -------------------------------------
+//
+// `setDirectory` mutates this binding; `replaceState` and `reset` read it.
+// Keeping it outside the store means the store stays serialisable.
+
+let _currentDir: ProjectDirectory | null = null;
+
+function currentDir(): ProjectDirectory | null {
+  return _currentDir;
 }
 
-/** Computed selectors. */
-export function describeGraph(graph: CodeGraphSnapshot): {
+function setCurrentDir(dir: ProjectDirectory | null): void {
+  _currentDir = dir;
+}
+
+/** Hydrate the store on app start. Returns true when state was loaded. */
+export async function hydrateCodeGraphStore(): Promise<boolean> {
+  // The actual hydration is driven by `setDirectory(dir)` once the user
+  // picks a folder (or via the dialog flow that calls setDirectory). We
+  // keep this hook for source compatibility with previous call sites that
+  // imported it from the IDB-based version — but it's a no-op now.
+  return false;
+}
+
+// --- selectors ------------------------------------------------------------
+
+export interface GraphSummary {
   totalEntities: number;
-  byKind: Record<string, number>;
+  byKind: Partial<Record<EntityKind, number>>;
   byLanguage: Record<string, number>;
-} {
+  archetypeCounts: Record<string, number>;
+}
+
+export function describeGraph(state: AgentState | null): GraphSummary {
+  if (!state) {
+    return { totalEntities: 0, byKind: {}, byLanguage: {}, archetypeCounts: {} };
+  }
   return {
-    totalEntities: Object.keys(graph.entitiesById).length,
-    byKind: entitiesByKind(graph),
-    byLanguage: entitiesByLanguage(graph),
+    totalEntities: state.stats.totalEntities,
+    byKind: state.stats.byKind,
+    byLanguage: state.stats.byLanguage,
+    archetypeCounts: state.stats.archetypeCounts,
   };
 }
 
-/** Filter entities matching a given name with optional kind and language constraints. */
+export interface MatchOptions {
+  kind?: EntityKind;
+  language?: string;
+  archetype?: string;
+}
+
 export function findMatchingEntities(
-  graph: CodeGraphSnapshot,
+  state: AgentState | null,
   query: string,
-  options?: { kind?: string; language?: string },
+  options?: MatchOptions,
 ): CodeEntity[] {
+  if (!state || !query) return [];
   const q = query.toLowerCase();
-  return Object.values(graph.entitiesById).filter((e) => {
-    if (options?.kind && e.kind !== options.kind) return false;
-    if (options?.language && e.language !== options.language) return false;
-    return e.name.toLowerCase().includes(q) || e.name.toLowerCase() === q.replace(/\s+/g, '_');
-  });
+  const out: CodeEntity[] = [];
+  for (const e of state.entities) {
+    if (e.kind === 'file' || e.kind === 'unknown') continue;
+    if (options?.kind && e.kind !== options.kind) continue;
+    if (options?.language && e.language !== options.language) continue;
+    if (options?.archetype && e.archetype !== options.archetype) continue;
+    const name = e.name.toLowerCase();
+    if (name.includes(q) || name === q.replace(/\s+/g, '_')) {
+      out.push(e);
+      if (out.length >= 30) break;
+    }
+  }
+  return out;
+}
+
+/** Convenience: all relations as a flat array. */
+export function listRelations(state: AgentState | null): CodeRelation[] {
+  return state?.relations ?? [];
 }

@@ -3,14 +3,13 @@
 Visual designer for AI-agent graphs. Drag orchestrators, sub-agents and skills
 onto a canvas, connect them, edit properties, generate Markdown instructions
 via a local Qwen CLI, and let the same project scan the real code you have on
-disk via tree-sitter — all client-side, all from a single dev or prod server
-on **one port**.
+disk via a universal in-house code-intel extractor — all client-side, all
+from a single dev or prod server on **one port**.
 
 ## Quick start (dev)
 
 ```sh
 npm install
-node scripts/fetch-grammars.cjs   # download tree-sitter language WASMs
 npm run dev                       # opens http://localhost:5173
 ```
 
@@ -51,24 +50,26 @@ rest of the app keeps working.
 ## Code-graph scan
 
 The bottom-left `Code graph` button opens a floating panel that walks the
-project folder you picked in the instruction dialog, parses each supported
-file, and builds an in-memory graph of classes / functions / methods /
-imports (TypeScript / JavaScript / Python). When you generate an instruction,
-any entities matching the node's label or function name are inserted into the
-prompt as Markdown snippets — the LLM then writes the instruction grounded
-in real signatures and doc comments rather than guessing.
+project folder you picked in the instruction dialog, runs the universal
+code-intel extractor over each supported file, and builds a graph of
+classes / functions / methods / imports. The extractor covers a wide set of
+languages out of the box (TypeScript, JavaScript, TSX, Python, Kotlin, Java,
+Scala, Groovy, C#, Go, Rust, C/C++, Swift, Ruby) without any per-language
+WASM runtime. When you generate an instruction, any entities matching the
+node's label or function name are inserted into the prompt as Markdown
+snippets — the LLM then writes the instruction grounded in real
+signatures, doc comments, file archetypes (controller / service /
+repository / …), modifiers and annotations rather than guessing.
 
-The scan uses `web-tree-sitter` (WASM) when its grammar files are present in
-`public/grammars/`, and falls back to a regex extractor otherwise.
+### Persistence
 
-To refresh or update grammars:
-
-```sh
-node scripts/fetch-grammars.cjs   # downloads runtime + TS/JS/Python grammars
-```
-
-Override pinned releases with env vars (`TREE_SITTER_TYPESCRIPT_VERSION`,
-etc.) — see the script.
+Scan results — entities, relations, learned archetypes, conventions, the
+Qwen semantic cache — are stored in `.agent-graph/state.json` **inside the
+picked project folder**, atomically written (tmp + rename). The folder's
+`.agent-graph/.gitignore` is auto-managed to keep the state out of source
+control unless the user opts in. This means the cache survives between
+sessions and travels with the project itself; there is no browser-only
+IndexedDB layer.
 
 ## Saving instructions to disk
 
@@ -88,11 +89,11 @@ browser download instead — the path is still recorded on the node.
 | `npm run server` | `build && prod` in one command |
 | `npm run preview` | Vite preview (port 4173, includes `/generate` middleware) |
 | `npm run build` | TypeScript project build + production bundle |
-| `npm run grammars` | Refresh `public/grammars/*.wasm` |
 | `npm run lint` | oxlint |
 
 ## Where things live
 
 See `AGENTS.md` for the full codebase guide — data model, store API, every
-component, tree-sitter architecture, bridge server architecture, and
-recipes for common changes.
+component, the code-intel pipeline (tokenize → brace/indent extractor →
+project-aware archetype learner → convention sniffer → search index),
+bridge server architecture, and recipes for common changes.

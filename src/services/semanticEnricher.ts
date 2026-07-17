@@ -3,13 +3,13 @@
 // `enrichEntity(entity)` returns the role + short description either from
 // the persisted cache, or by calling `qwen -p <prompt>` and parsing the
 // response. After a successful call the result is written to the
-// semanticCache (memory + IDB). Any failure (Qwen down, parse miss, …)
+// semanticCache (memory + .agent-graph/state.json). Any failure (Qwen down, parse miss, …)
 // falls back to `{ role: 'unknown', description: '…' }` so callers can
 // proceed without enriching.
 
 import { generateViaQwen, QwenUnavailableError } from './qwenClient';
 import { semanticCache, type SemanticInfo } from './semanticCache';
-import type { CodeEntity } from './treeSitter/codeGraph';
+import type { CodeEntity } from './codeIntel/types';
 
 const BODY_MAX = 2000;
 const DESCRIPTION_MAX = 100;
@@ -117,7 +117,7 @@ export async function enrichEntity(entity: CodeEntity): Promise<SemanticInfo> {
     timestamp: Date.now(),
   };
 
-  // 4. Cache write-through (memory + IDB) — fire-and-forget IDB persist.
+  // 4. Cache write-through (memory + debounced flush to .agent-graph/state.json).
   await semanticCache.set(info);
   return info;
 }

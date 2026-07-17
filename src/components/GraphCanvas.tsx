@@ -21,8 +21,9 @@ import Toolbar from './Toolbar';
 import CodeGraphToolbarButton from './CodeGraphToolbarButton';
 import type { NodeType } from '../types';
 import { autoLayout } from '../utils/autoLayout';
-import { hydrateCodeGraphStore } from '../store/useCodeGraphStore';
+import { useCodeGraphStore } from '../store/useCodeGraphStore';
 import { semanticCache } from '../services/semanticCache';
+import { useFileSystemStore } from '../store/useFileSystemStore';
 
 const nodeTypes = {
   orchestrator: OrchestratorNode,
@@ -45,11 +46,18 @@ const GraphCanvas = () => {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const { screenToFlowPosition, fitView } = useReactFlow();
   const { nodes, edges, selectedNodeId, onNodesChange, onEdgesChange, onConnect, addNode, selectNode, setNodesPositions } = useGraphStore();
+  const directory = useFileSystemStore((s) => s.directory);
 
+  // Re-bind the semantic cache and the code-intel store to whichever project
+  // folder is currently picked, and re-hydrate them from
+  // `.agent-graph/state.json` on switch.
   useEffect(() => {
-    void hydrateCodeGraphStore();
-    void semanticCache.loadFromDB();
-  }, []);
+    void (async () => {
+      semanticCache.setDirectory(directory);
+      await semanticCache.loadFromDB();
+      await useCodeGraphStore.getState().setDirectory(directory);
+    })();
+  }, [directory]);
 
   const onDragStart = useCallback(
     (event: React.DragEvent, nodeType: NodeType) => {

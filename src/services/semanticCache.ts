@@ -1,12 +1,33 @@
-// Two-tier cache for semantic info (Qwen-derived role + description per code entity).
+// Per-project semantic cache for Qwen-derived {role, description} entries.
 //
-// - sync (in-memory Map) for fast reads when assembling context
-// - async (IndexedDB via idb-keyval) for persistence across reloads
+// Persistence target: `.agent-graph/state.json` *inside the picked project
+// folder*. This keeps cache state scoped to the project it describes and
+// lets the user carry it between machines via the folder itself — no
+// IndexedDB, no localStorage, no browser-only stores.
 //
-// Top-level singleton: the cache lives for the whole tab. Call `loadFromDB`
-// once at app start to warm the in-memory layer from disk.
+// In-memory map stays as a singleton for O(1) sync reads from the
+// context collector; persistence is debounced because state.json is the
+// canonical full-state file and we don't want to rewrite it once per
+// entity on a 10-entity enrichment batch.
+//
+// Lifecycle:
+//   GraphCanvas subscribes to `useFileSystemStore.directory` and calls
+//   `setDirectory(dir)` whenever the user picks/switches/clears the
+//   folder. Then `loadFromDB()` hydrates the in-memory map from
+//   `state.semantic`. Writes via `set()` go to memory immediately and
+//   schedule a coalesced flush to state.json (debounced ~400ms).
+//   `flush()` forces an immediate write; `clear()` wipes memory and the
+//   `state.semantic` field on disk.
 
-import { get, keys, set as kvSet, clear as kvClear } from 'idb-keyval';
+import type { ProjectDirectory } from './fileSystem';
+import {
+  loadAgentState,
+  saveAgentState,
+} from './codeIntel/stateIO';
+import {
+  AGENT_STATE_VERSION,
+  type AgentState,
+} from './codeIntel/types';
 
 export interface SemanticInfo {
   entityId: string;
@@ -15,11 +36,96 @@ export interface SemanticInfo {
   timestamp: number;
 }
 
-const STORE_NAME = 'agent-designer-semantic-cache';
+const FLUSH_DEBOUNCE_MS = 400;
 
 const memory = new Map<string, SemanticInfo>();
+let currentDir: ProjectDirectory | null = null;
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+let flushing = false;
+let flushWaiters: Array<() => void> = [];
+
+function buildMinimalState(dir: ProjectDirectory): AgentState {
+  return {
+    version: AGENT_STATE_VERSION,
+    projectFingerprint: dir.name,
+    rootPath: dir.name,
+    lastScannedAt: new Date(0).toISOString(),
+    totalFilesScanned: 0,
+    entities: [],
+    relations: [],
+    archetypes: {
+      projectFingerprint: dir.name,
+      rulesByPackage: {},
+      fileAssignment: {},
+    },
+    conventions: {},
+    semantic: {},
+    stats: {
+      totalEntities: 0,
+      byKind: {} as AgentState['stats']['byKind'],
+      byLanguage: {},
+      archetypeCounts: {},
+    },
+  };
+}
+
+async function loadOrBootstrap(dir: ProjectDirectory): Promise<AgentState> {
+  const existing = await loadAgentState(dir);
+  if (existing) return existing;
+  return buildMinimalState(dir);
+}
+
+function notifyFlushWaiters(): void {
+  const w = flushWaiters;
+  flushWaiters = [];
+  for (const fn of w) fn();
+}
+
+async function doFlush(): Promise<void> {
+  if (flushing) return;
+  flushing = true;
+  try {
+    if (!currentDir) return;
+    const snapshot = Object.fromEntries(memory);
+    const state = await loadOrBootstrap(currentDir);
+    state.semantic = snapshot;
+    await saveAgentState(currentDir, state);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[semanticCache] flush failed:', err);
+  } finally {
+    flushing = false;
+    notifyFlushWaiters();
+  }
+}
+
+function scheduleFlush(): void {
+  if (flushTimer) return;
+  if (!currentDir) return;
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    void doFlush();
+  }, FLUSH_DEBOUNCE_MS);
+}
 
 export const semanticCache = {
+  /** Switch the persistence target. Call when the user picks a folder. */
+  setDirectory(dir: ProjectDirectory | null): void {
+    if (currentDir === dir) return;
+    currentDir = dir;
+    // In-memory cache is *not* cleared on directory switch: each entry is
+    // keyed by entityId, which is path-derived, so reloading from the new
+    // folder's state.json overwrites entries one-by-one. Until the new
+    // folder's state.json is loaded (via loadFromDB), in-memory hits from
+    // a previous folder would be wrong — loadFromDB will overwrite them.
+    scheduleFlush();
+  },
+
+  /** Currently-bound directory (null = persistence disabled). */
+  getDirectory(): ProjectDirectory | null {
+    return currentDir;
+  },
+
   /** Synchronous in-memory read. */
   getSync(entityId: string): SemanticInfo | undefined {
     return memory.get(entityId);
@@ -30,68 +136,60 @@ export const semanticCache = {
     memory.set(info.entityId, info);
   },
 
-  /** Hydrate the in-memory map from IndexedDB. Call once at app start. */
+  /** Hydrate the in-memory map from `.agent-graph/state.json`. */
   async loadFromDB(): Promise<number> {
-    let loaded = 0;
+    if (!currentDir) return 0;
     try {
-      const allKeys = await keys();
-      for (const k of allKeys) {
-        if (typeof k !== 'string') continue;
-        const value = await get<SemanticInfo>(k);
-        if (value && value.entityId) {
-          memory.set(value.entityId, value);
+      const state = await loadAgentState(currentDir);
+      if (!state?.semantic) return 0;
+      let loaded = 0;
+      for (const [id, info] of Object.entries(state.semantic)) {
+        if (info && typeof info === 'object' && 'entityId' in info) {
+          memory.set(id, info as SemanticInfo);
           loaded += 1;
         }
       }
+      return loaded;
     } catch (err) {
-      // IndexedDB unavailable (SSR, private mode, etc.) — degrade silently.
       // eslint-disable-next-line no-console
       console.warn('[semanticCache] loadFromDB failed:', err);
-    }
-    return loaded;
-  },
-
-  /** Persist a single record to IDB (memory must already hold it). */
-  async persistToDB(entityId: string): Promise<void> {
-    const info = memory.get(entityId);
-    if (!info) return;
-    try {
-      await kvSet(entityId, info);
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn(`[semanticCache] persist failed for ${entityId}:`, err);
+      return 0;
     }
   },
 
-  /** Read-through: in-memory first, then IDB. Updates memory on hit. */
+  /** Read-through (in-memory only — loadFromDB has already populated it). */
   async get(entityId: string): Promise<SemanticInfo | undefined> {
-    const hit = memory.get(entityId);
-    if (hit) return hit;
-    try {
-      const value = await get<SemanticInfo>(entityId);
-      if (value) memory.set(entityId, value);
-      return value;
-    } catch {
-      return undefined;
-    }
+    return memory.get(entityId);
   },
 
-  /** Write-through: memory + IDB. */
+  /** Write-through: memory + debounced disk flush. */
   async set(info: SemanticInfo): Promise<void> {
     memory.set(info.entityId, info);
-    try {
-      await kvSet(info.entityId, info);
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn(`[semanticCache] set failed for ${info.entityId}:`, err);
-    }
+    scheduleFlush();
   },
 
-  /** Wipe everything (memory + IDB). Call on `code-graph reset` to avoid stale data. */
+  /** Force an immediate disk write. Awaits any in-flight flush. */
+  async flush(): Promise<void> {
+    if (flushTimer) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
+    }
+    if (!currentDir || memory.size === 0) return;
+    if (flushing) {
+      await new Promise<void>((resolve) => flushWaiters.push(resolve));
+      return;
+    }
+    await doFlush();
+  },
+
+  /** Wipe memory and the on-disk `state.semantic` field. */
   async clear(): Promise<void> {
     memory.clear();
+    if (!currentDir) return;
     try {
-      await kvClear();
+      const state = await loadOrBootstrap(currentDir);
+      state.semantic = {};
+      await saveAgentState(currentDir, state);
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn('[semanticCache] clear failed:', err);
@@ -104,5 +202,16 @@ export const semanticCache = {
   },
 };
 
-// Re-export the store name so tests / dev-tools can verify it.
-export const SEMANTIC_CACHE_STORE = STORE_NAME;
+// On page hide, flush whatever is pending so a tab close mid-batch
+// doesn't lose the user's last enrichments.
+if (typeof window !== 'undefined') {
+  const onHide = () => {
+    void semanticCache.flush();
+  };
+  window.addEventListener('pagehide', onHide);
+  window.addEventListener('beforeunload', onHide);
+}
+
+// Re-exported for tests / dev-tools (kept for source compatibility with
+// the previous idb-keyval-based implementation).
+export const SEMANTIC_CACHE_STORE = 'state.semantic';

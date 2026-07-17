@@ -14,7 +14,7 @@
 
 Приложение поддерживает также:
 - генерацию Markdown-инструкции для любой ноды через локальный Qwen CLI с привязкой к шаблонам;
-- сканирование выбранной папки проекта через tree-sitter (WASM) для построения графа кода, чтобы LLM писал инструкции по реальным сигнатурам, а не на глаз.
+- сканирование выбранной папки проекта через собственный универсальный code-intel экстрактор (tokenize → brace/indent extractor → project-aware archetype learner → convention sniffer → search index) для построения графа кода, чтобы LLM писал инструкции по реальным сигнатурам, а не на глаз. Без per-language WASM.
 
 Приложение полностью клиентское; единственная server-сторона — лёгкий Node-bridge для `spawn('qwen', …)`, раздаваемый на том же origin'е (порт `5173` в dev, `3001` в prod).
 
@@ -37,7 +37,6 @@
 │        │       addNode(type, pos)                                │
 │        ↓                                                          │
 │   fetch('/generate', POST {prompt})                              │
-│   fetch('/grammars/*.wasm')                                      │
 │   (same origin → no CORS)                                        │
 │                                                                  │
 │   Zustand stores:                                                │
@@ -61,7 +60,7 @@
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-**Один порт, одно приложение.** Лоадер грамматик `web-tree-sitter` тянет `/grammars/*.wasm` (Vite dev отдаёт из `public/`, prod-server.mjs отдаёт из `dist/`, тот же origin).
+**Один порт, одно приложение.** Один и тот же Node-процесс (`server/prod-server.mjs`) раздаёт и SPA, и qwen bridge (`/generate`, `/health`). В dev тот же handler сидит в `vite.config.ts` как middleware — никаких WASM-ассетов в обоих режимах нет.
 
 ---
 
@@ -77,7 +76,7 @@
 | Icons | `lucide-react` 1.x | всё UI (ноды, панели, toolbar, controls) |
 | Styling | Tailwind 3 + PostCSS | glassmorphism в `src/index.css` `@layer components` |
 | Filesystem access | File System Access API | хранилище для записи инструкций; fallback на browser download |
-| Code parsing | `web-tree-sitter` 0.26 | WASM-грамматики в `public/grammars/`; regex-фолбэк |
+| Code parsing | Custom code-intel extractor | Universal brace/indent extractors в `src/services/codeIntel/extractors/`; project-aware archetype learner; convention sniffer; search index. Без per-language WASM. |
 | Qwen bridge | Node `http` built-in | `server/qwenHandler.mjs` — без внешних deps |
 | Lint | `oxlint` (`npm run lint`) | |
 | Entry | `src/main.tsx` → `src/App.tsx` (внутри `<ReactFlowProvider>`) | |
@@ -89,7 +88,7 @@
 ```
 agent-graph-designer/
 ├── index.html                          # Google Fonts (Inter) + #root
-├── package.json                        # scripts: dev, build, lint, preview, server, prod, grammars
+├── package.json                        # scripts: dev, build, lint, preview, server, prod
 ├── vite.config.ts                      # vite + @vitejs/plugin-react + qwenBridge() middleware
 ├── tsconfig.json / .app / .node        # strict TS, verbatimModuleSyntax
 ├── tailwind.config.js, postcss.config.js, .oxlintrc.json
@@ -97,15 +96,9 @@ agent-graph-designer/
 ├── README.md
 ├── AGENTS.md
 ├── public/
-│   ├── favicon.svg, icons.svg
-│   └── grammars/                       # WASM, вендоренные через scripts/fetch-grammars.cjs
-│       ├── web-tree-sitter.wasm        # runtime
-│       ├── tree-sitter-typescript.wasm
-│       ├── tree-sitter-javascript.wasm
-│       └── tree-sitter-python.wasm
+│   └── favicon.svg, icons.svg
 ├── scripts/
-│   ├── generate-base-config.cjs        # Node-скрипт, регенерирует base-config.json
-│   └── fetch-grammars.cjs              # скачивает WASM-грамматики в public/grammars/
+│   └── generate-base-config.cjs        # Node-скрипт, регенерирует base-config.json
 ├── server/
 │   ├── qwenHandler.mjs                 # shared handler: /generate, /health, dispatchBridge
 │   └── prod-server.mjs                 # production: один Node-процесс на dist/ + /generate + /health
@@ -118,20 +111,27 @@ agent-graph-designer/
 │   ├── store/
 │   │   ├── useGraphStore.ts            # nodes / edges / selection / projectName
 │   │   ├── useFileSystemStore.ts       # picked project directory + lastError
-│   │   └── useCodeGraphStore.ts        # code-graph snapshot, scan progress, persist в IDB
+│   │   └── useCodeGraphStore.ts        # AgentState (entities/relations/archetypes/conventions/semantic), scan progress, persist в .agent-graph/state.json
 │   ├── services/
 │   │   ├── qwenClient.ts               # fetch wrapper /generate (relative URL)
 │   │   ├── fileSystem.ts               # FS Access API + browser-download fallback
 │   │   ├── instructionGenerator.ts     # prompt builder + relativePathForNode + frontmatter parser/validator
-│   │   └── treeSitter/
-│   │       ├── loader.ts               # WASM runtime init + grammar fetch/IDB-cache
-│   │       ├── codeGraph.ts            # CodeEntity/CodeRelation/ParseResult (доменные типы)
-│   │       ├── codeGraphStore.ts       # in-memory graph: mergeParseResult, clearGraph, queries
-│   │       ├── tsExtractor.ts          # AST walker: TS/JS/Python, вытаскивает entities
-│   │       ├── regexExtractor.ts       # fallback parser (regex-based, без wasm)
-│   │       ├── codeParserSelector.ts   # runParserForFile: tree-sitter → regex
-│   │       ├── folderScanner.ts        # walks picked FileSystemDirectoryHandle → graph
-│   │       └── contextCollector.ts     # top-N match node→entities, рендерит Markdown
+│   │   ├── semanticCache.ts            # in-memory + .agent-graph/state.json persistence для Qwen ролей
+│   │   ├── semanticEnricher.ts         # enrichEntity: Qwen-derived role + description
+│   │   └── codeIntel/
+│   │       ├── layer.ts                # analyzeProject(dir) — единая entry-point, чанки, прогресс, abort
+│   │       ├── tokenize.ts             # лексер (без WASM)
+│   │       ├── types.ts                # CodeEntity/CodeRelation/AgentState/Archetype/Languages
+│   │       ├── stateIO.ts              # load/save/clear .agent-graph/state.json (atomic)
+│   │       ├── archetypeLearner.ts     # Qwen-based per-package archetype learning + cache
+│   │       ├── architecture.ts         # статические regex-фолбэки для archetype
+│   │       ├── conventions.ts          # convention sniffer (indent/naming/imports/frameworks)
+│   │       ├── searchIndex.ts          # inverted index поверх state.entities
+│   │       ├── util.ts                 # утилиты
+│   │       ├── contextCollector.ts     # top-N match node→entities, рендерит Markdown с archetype/annotations/modifiers
+│   │       └── extractors/
+│   │           ├── braceLanguage.ts    # brace-based: Kotlin/Java/Scala/TS/JS/Go/Rust/C#/Swift/Ruby/C/C++
+│   │           └── indentLanguage.ts   # indent-based: Python
 │   ├── utils/autoLayout.ts             # иерархическая top-down раскладка
 │   └── components/
 │       ├── GraphCanvas.tsx             # top-level shell, держит React Flow + панели
@@ -242,37 +242,46 @@ orchestrator → skill      → skill_attachment
 
 ## 8. State management — `useCodeGraphStore`
 
-Стор (`src/store/useCodeGraphStore.ts`) с UI-состоянием сканирования и снапшотом графа кода:
+Стор (`src/store/useCodeGraphStore.ts`) с UI-состоянием сканирования и `AgentState`:
 
 ```ts
 {
-  graph: CodeGraphSnapshot,    // доменная модель — entities + relations
+  state: AgentState | null,    // entities + relations + archetypes + conventions + semantic + stats
   phase: 'idle'|'scanning'|'done'|'error'|'cancelled',
   error: string | null,
-  progress: { scanned, matched, skipped, errors, currentFile? },
-  parserUsed: 'tree-sitter'|'regex-fallback'|'mixed'|null,
-  setProgress, setPhase, setParserUsed,
-  replaceGraph(next), reset()
+  progress: { phase, current, total, detail?, scanned, matched, errors, currentFile? },
+  parser: 'code-intel' | null,  // всегда code-intel (ранее было tree-sitter|regex-fallback|mixed)
+  cacheHit: boolean | null,     // true если load/analyze использовал persisted AgentState
+  setProgress, setPhase, setParser, setCacheHit,
+  replaceState(next),            // сохраняет в .agent-graph/state.json атомарно
+  reset(),                       // очищает state.json на диске
+  setDirectory(dir | null)       // биндит к проекту и читает state.json при смене папки
 }
 ```
 
-### 8.1 `CodeGraphSnapshot` (`services/treeSitter/codeGraphStore.ts`)
+### 8.1 `AgentState` (`services/codeIntel/types.ts`)
 
 ```ts
 {
-  rootPath: string | null,
-  parsedAt: string | null,
-  entitiesById: Record<id, CodeEntity>,
-  entitiesByFile: Record<filePath, id[]>,
-  relations: CodeRelation[]
+  version: 1,
+  projectFingerprint: string,        // dir.name + найденные манифесты
+  rootPath: string,
+  lastScannedAt: string,
+  totalFilesScanned: number,
+  entities: CodeEntity[],            // плоский массив
+  relations: CodeRelation[],
+  archetypes: ProjectArchetypeIndex, // learned per-package правила
+  conventions: Record<lang, ConventionReport>,
+  semantic: Record<entityId, SemanticInfo>,
+  stats: { totalEntities, byKind, byLanguage, archetypeCounts }
 }
 ```
 
-`CodeEntity` имеет `id` формы `<file>::<kind>::<name>::<line>`, `name`, `kind` (file/class/interface/function/method/variable/enum/module/annotation), `signature`, `bodySnippet`, `docComment`, `startLine`/`endLine`, `language`.
+`CodeEntity` имеет `id`, `kind` (file/class/interface/object/enum/function/method/variable/annotation/unknown), `name`, `signature`, `bodySnippet`, `docComment`, `startLine`/`endLine`, `language`, **`modifiers`, `annotations`, `archetype`, `archetypeConfidence`** (новые поля code-intel), `parentId`, `semanticRole`, `semanticDescription`.
 
-### 8.2 Hydration через IndexedDB
+### 8.2 Hydration через `.agent-graph/state.json`
 
-При старте приложения `GraphCanvas` вызывает `hydrateCodeGraphStore()` (в `useEffect`), которая читает последний снапшот из IDB-стора `agent-designer-code-graph` и восстанавливает `graph`. Каждый `replaceGraph` сохраняет новый снапшот — пользователю не приходится пересканировать после reload.
+При смене выбранной папки `GraphCanvas` вызывает `useCodeGraphStore.getState().setDirectory(directory)`, которая читает `.agent-graph/state.json` внутри папки (через `codeIntel/stateIO.loadAgentState`) и восстанавливает `state`. Каждый `replaceState` атомарно сохраняет новый `AgentState` (tmp + rename) — пользователю не приходится пересканировать после reload, и кэш живёт в самой папке проекта, а не в IndexedDB браузера.
 
 ### 8.3 Helpers
 
@@ -612,107 +621,120 @@ Show concrete examples of using this Skill.
 
 ---
 
-### 11.9 Tree-sitter code-graph scan
+### 11.9 Code-intel pipeline (замена tree-sitter WASM)
 
-**Где:** `src/services/treeSitter/*`, `src/store/useCodeGraphStore.ts`, `src/components/CodeGraphToolbarButton.tsx`, `scripts/fetch-grammars.cjs`.
+Универсальный экстрактор в `src/services/codeIntel/`. Без per-language WASM, без IDB. Состояние живёт в `.agent-graph/state.json` внутри выбранной папки проекта (атомарная запись tmp + rename).
 
-#### 11.9.1 Загрузка WASM
+**Где:** `src/services/codeIntel/*`, `src/store/useCodeGraphStore.ts`, `src/components/CodeGraphToolbarButton.tsx`, `src/services/semanticEnricher.ts`.
 
-1. `scripts/fetch-grammars.cjs` скачивает runtime (`web-tree-sitter.wasm` из `node_modules/`) и грамматики (`tree-sitter-{typescript,javascript,python}.wasm`) с официальных GitHub-релизов, кладёт в `public/grammars/`. Закреплённые версии — env-переменными (`TREE_SITTER_TYPESCRIPT_VERSION` и т.п.).
-2. `npm run grammars` запускает этот скрипт.
-3. Vite отдаёт `/grammars/*.wasm` из `public/`. Prod-сервер отдаёт их же из `dist/grammars/*.wasm`.
-4. `services/treeSitter/loader.ts`:
-   - `Parser.init({ locateFile: name => \`/grammars/${name}\` })` — runtime self-locates.
-   - `getLanguage(lang)` для каждого языка: `fetch(url)` → `arrayBuffer()` → сохраняет в IDB-стор `agent-designer-grammar-cache` → `Parser.Language.load(new Uint8Array(buf))`.
-   - `detectAvailableGrammars()` — HEAD-запросы для каждого URL, чтобы UI пометил «tree-sitter available» / «regex fallback» без подгрузки.
+#### 11.9.1 Архитектура слоёв
 
-#### 11.9.2 Парсер: tree-sitter или regex (`codeParserSelector.runParserForFile`)
+```
+tokenize            → лексер (chars → tokens, без WASM)
+extractors/
+  braceLanguage     → Kotlin/Java/Scala/TS/JS/TSX/Go/Rust/C#/Swift/Ruby/C/C++
+  indentLanguage    → Python
+archetypeLearner    → Qwen per-package classification + cache
+architecture.ts     → статические regex-фолбэки (если Qwen offline / fresh project)
+conventions.ts      → convention sniffer (indent/naming/imports/frameworks)
+searchIndex.ts      → inverted index поверх state.entities
+stateIO.ts          → атомарная запись .agent-graph/state.json
+layer.ts            → analyzeProject(dir) — единая entry-point
+```
 
-1. `languageForExtension(ext)` маппит расширение в `SupportedLanguage` (`typescript|tsx|javascript|python`).
-2. Сначала пробует `TreeSitterCodeParser.parseFile(filePath, source)` (async):
-   - `getLanguage(resolution.language)` → загружает Language.
-   - `new Parser().setLanguage(lang).parse(source)` → `tree.rootNode`.
-   - `extractForResolution(tree, filePath, source, resolution)`:
-     - для `python` → `extractEntities_Python`.
-     - иначе → `extractEntities_TS` (TS/JS/TSX).
-3. При ошибке или отсутствии грамматики — `RegexCodeParser.parse(filePath, source, language)`:
-   - TS/JS: regex'ы для `class`/`interface`/`function`/`enum`/`type`/`const`/`import`, brace-balanced для тела.
-   - Python: regex'ы для `class`/`def`/`import`, indent-balanced для тела.
-4. Оба возвращают единый `ParseResult`: `{ entities, relations }`.
-
-#### 11.9.3 Extractor (TS/JS) — что вытаскивается
+#### 11.9.2 Extractor (braceLanguage) — что вытаскивается
 
 - `function_declaration`, `generator_function_declaration`, `arrow_function` (внутри `variable_declarator`)
-- `class_declaration`/`class`, `interface_declaration`, `enum_declaration`
-- `method_definition`
-- `import_statement` (создаёт module entities + `imports` relation)
+- `class_declaration`, `interface_declaration`, `enum_declaration`, `object_declaration`
+- `method_definition`, `constructor`
+- `import_statement` / `import_from_statement` (создаёт module entities + `imports` relation)
 - `export_statement` (рекурсия в inner)
 - `lexical_declaration` (recurse в `variable_declarator`)
-- Каждый entity: `id`, `kind`, `name`, `signature`, `bodySnippet` (≤24 строк, ≤2.4 KB), `docComment`, `filePath`, `startLine`/`endLine`, `language`, `parentId`.
+- Аннотации Kotlin/Java (`@Foo`, `@Bar(...)`) собираются в `entity.annotations`
+- Модификаторы (`public`, `private`, `final`, `static`, `suspend`, `override`, …) собираются в `entity.modifiers`
+- Каждый entity: `id`, `kind`, `name`, `signature`, `bodySnippet` (≤24 строк, ≤2.4 KB), `docComment`, `filePath`, `startLine`/`endLine`, `language`, `parentId`, `modifiers?`, `annotations?`.
 
-#### 11.9.4 Extractor (Python)
+#### 11.9.3 Extractor (indentLanguage — Python)
 
-- `function_definition`, `class_definition`, `import_statement`/`import_from_statement`, `decorated_definition`.
+- `function_definition`, `class_definition`, `import_statement`/`import_from_statement`, `decorated_definition`. Indent-balanced extraction для тела.
 
-#### 11.9.5 Folder scanner (`folderScanner.scanProjectDirectory`)
+#### 11.9.4 Folder scanner (`layer.ts → walk/readFileContent`)
 
 1. Требует `FileSystemDirectoryHandle` (FS Access API). Если недоступно — выбрасывает ошибку.
-2. Строит `progress = { scanned, matched, skipped, errors, done }`.
-3. `walk(dir.handle, '')` рекурсивно собирает пути через `handle.entries()`. Пропускает `node_modules`, `.git`, `dist`, `coverage`, `target`, `__pycache__`, директории начинающиеся с `.`.
+2. Строит `progress = { phase, current, total, detail }`. Фазы: `reading → extracting → archetyping → conventions → saving → done`.
+3. `walk(dir.handle, '')` рекурсивно собирает пути через `handle.entries()`. Пропускает `node_modules`, `.git`, `.next`, `.nuxt`, `dist`, `build`, `out`, `.cache`, `.vercel`, `.turbo`, `__pycache__`, `.venv`, `venv`, `target`, `.idea`, `.vscode`, `coverage`, `.gradle`, `.terraform`, `.agent-graph` (наш собственный state), `.svn`, `.hg`, и любые директории на `.` (кроме `.editorconfig`).
 4. Фильтрует по `languageForExtension(ext)` — увеличивает `matched`.
-5. Останавливается при `options.maxFiles` или сигнале отмены.
+5. Останавливается при `options.abort?.aborted`.
 6. Обрабатывает matched в чанках по 25 файлов:
    - Для каждого файла: `getDirectoryHandle(parts) → getFileHandle(name) → file.text()`.
-   - Файл >1 MiB → `skipped++`.
-   - `runParserForFile(filePath, source)` → `mergeParseResult(graph, ...)` (pre-drop entities по файлу + push новых + добавить relations).
+   - Файл >1 MiB → `errors++`, skip.
+   - `extractEntitiesForFile(filePath, source)` → `entities[] + relations[]`.
    - `await new Promise(r => setTimeout(r, 0))` между чанками — yield UI thread.
-7. По завершении — `progress.done = true`.
 
-`mergeParseResult(snapshot, { filePath, entities, relations })`:
-- Удаляет все ранее существующие entities по этому файлу (через `entitiesByFile[filePath]`) + связанные relations.
-- Добавляет новые entities и relations.
+#### 11.9.5 Archetype learner (`archetypeLearner.ts → learnArchetypes`)
 
-#### 11.9.6 UI: плавающая панель `CodeGraphToolbarButton`
+1. `groupFilesByPackage(entities)` — группирует по 2-segment path signature.
+2. На каждый package — Qwen-запрос: «прочитай первые ~200 строк из каждого файла в этом package и определи archetype (controller/service/repository/…)».
+3. Результаты сохраняются в `state.archetypes.rulesByPackage[packageSig]` (source: `qwen`).
+4. Cache hit (fingerprint не менялся) — пропускает Qwen, переиспользует правила.
+5. Static fallback (`architecture.ts`) — если Qwen offline или fresh project, по filename/path regex восстанавливает `source: 'static'` правила.
+
+#### 11.9.6 Convention sniffer (`conventions.ts → detectConventions`)
+
+На каждый язык: counts indent (2sp/4sp/tabs), naming style (camelCase/snake_case/PascalCase/UPPER_SNAKE), top imports, detected frameworks. Результат в `state.conventions[lang]`.
+
+#### 11.9.7 Persistence в `.agent-graph/state.json`
+
+- `stateIO.ts` → `loadAgentState(dir)` / `saveAgentState(dir, state)` / `clearAgentState(dir)`.
+- Атомарная запись через `<state>.tmp` → read back → write final → remove tmp (FS Access API не даёт rename, поэтому copy-then-delete).
+- Авто-создаётся `.agent-graph/.gitignore` с содержимым `*\n!.gitignore\n`, чтобы state не утекал в коммиты без явного одобрения пользователя.
+- `AgentState` содержит: `entities`, `relations`, `archetypes`, `conventions`, `semantic`, `stats`, плюс meta (`version`, `projectFingerprint`, `rootPath`, `lastScannedAt`, `totalFilesScanned`).
+
+#### 11.9.8 UI: плавающая панель `CodeGraphToolbarButton`
 
 1. Bottom-left, fixed, открывается по клику.
 2. Если `directory` не выбрана — кнопка Scan now сначала зовёт `pickProjectDirectory()`, потом сканирование.
-3. `beginScan`: status `scanning`, прогресс через `onProgress`, по завершении `replaceGraph(graph)` → IDB-сохранение.
-4. **Search** по имени (top-8 совпадений из `findMatchingEntities`).
-5. **Stats**: сетка с подсчётом per kind.
-6. **Parser indicator**: `tree-sitter` / `regex-fallback` показывается как маленькая pill.
+3. `beginScan`: status `scanning`, прогресс через `onProgress`, по завершении `replaceState(result.state)` → атомарная запись `state.json` + UI badge `cached`/`fresh` по `cacheHit`.
+4. **Search** по имени (top-8 совпадений из `findMatchingEntities`, с фильтрами kind/language/archetype).
+5. **Stats**: сетка с подсчётом per kind + per archetype.
+6. **Parser indicator**: `code-intel` pill + `cached`/`fresh` pill (заменили `tree-sitter`/`regex-fallback`).
 
-#### 11.9.7 Context collector
+#### 11.9.9 Context collector (`codeIntel/contextCollector.ts`)
 
 1. `codeNameCandidates(node)`:
    - Skill: `safeSlug(label)`, `safeSlug(functionName)`.
    - Agent/Orchestrator: `safeSlug(label)` + первые ~6 токенов из `instructions`, прошедшие фильтр `^[a-zA-Zа-яА-ЯёЁ_][\w]*$`.
-2. `collectContextForNode(node, graph)`:
-   - Скорит все entities (не file/module) по совпадению имён с candidates (exact=10, substring=4), штраф −1 для коротких (≤80 chars) function-entities.
-   - Берёт top-5, рендерит Markdown с `### <signature>`, `*File:* \`path\`, line N`, JSDoc/doc, обрезанный body в ` ```ts ` или ` ```python `.
+2. `collectContextForNode(node, state)`:
+   - Скорит все entities (не file/unknown) по совпадению имён с candidates (exact=10, substring=4), штраф −1 для коротких (≤80 chars) function-entities.
+   - Берёт top-`poolSize` (15), enrich через Qwen, ре-ранжирует по recognized-role + non-empty description.
+   - Берёт top-`maxSnippets` (10), рендерит Markdown:
+     - `### <signature>`
+     - `- **Archetype:** \`<archetype>\` (high|medium|low)` — **новое поле**
+     - `- **Semantic role:** \`<qwen-role>\``
+     - `- **Summary:** <qwen-description>`
+     - `- **Modifiers:** \`public suspend override\`` — **новое поле**
+     - `- **Annotations:** \`@RestController @RequestMapping(...) \`` — **новое поле**
+     - `- **File:** \`path\`, line N`
+     - JSDoc/doc
+     - Обрезанный body в ` ```kotlin|java|ts|tsx|python|... `
 
-`buildPromptForNode` инжектит результат под `## Project Code Context` — Qwen использует это как ground truth, не как намёк.
+`buildPromptForNode` инжектирует результат под `## Project Code Context` — Qwen использует это как ground truth, не как намёк.
 
-#### 11.9.8 Снапшот в IndexedDB
-
-- Стор `agent-designer-code-graph` (version 1), ключ `'latest'`.
-- `hydrateCodeGraphStore()` читает на старте.
-- `replaceGraph` пишет после каждого скана.
-- `reset` очищает и UI и persistence.
-
-#### 11.9.9 Failure modes
+#### 11.9.10 Failure modes
 
 | Симптом | Поведение |
 |---|---|
-| WASM 404 на `/grammars/*` | `runParserForFile` ловит, fallback на `RegexCodeParser`. UI работает, entities менее точны. |
+| Qwen offline при archetype learning | `archetypeLearner` ловит, fallback на `architecture.ts` (static regex). |
 | Браузер без FS Access | Скан недоступен; dialog прячет trigger или показывает ошибку |
 | Файл >1 MiB | Тихо пропускается |
-| Сетевой сбой при первой загрузке | IDB cache используется на следующем визите |
+| Fingerprint не совпал (манифест изменился) | `cacheHit = false`, всё пересчитывается |
+| `state.json` повреждён | `loadAgentState` возвращает null, чистый старт |
 
 ---
 
 ### 11.10 Семантическое обогащение графа кода через Qwen
 
-Поверх tree-sitter scanner'а лежит слой семантики: Qwen получает сигнатуру + тело каждой сущности, попавшей в контекст, и возвращает короткое описание роли (`controller`/`service`/`repository`/…) плюс one-line summary. Результат кешируется и подставляется в `## Project Code Context` под каждой сущностью, чтобы основной вызов `/generate` получал уже размеченную выжимку вместо сырых сигнатур.
+Поверх code-intel extractor'а лежит слой семантики: Qwen получает сигнатуру + тело каждой сущности, попавшей в контекст, и возвращает короткое описание роли (`controller`/`service`/`repository`/…) плюс one-line summary. Результат кешируется в `state.semantic` (внутри того же `state.json`) и подставляется в `## Project Code Context` под каждой сущностью, чтобы основной вызов `/generate` получал уже размеченную выжимку вместо сырых сигнатур.
 
 #### Архитектура
 
@@ -727,10 +749,10 @@ Show concrete examples of using this Skill.
         enrichEntities(entities, onProgress)   │
         │  for each entity (sequential):        │
         │   enrichEntity(entity)                │
-        │     ├─ semanticCache.get (IDB-first)  │
+        │     ├─ semanticCache.get (memory map, source of truth = state.semantic in state.json)
         │     ├─ cache miss → qwen -p prompt    │
         │     ├─ parse РОЛЬ / ОПИСАНИЕ lines     │
-        │     └─ semanticCache.set (write-through)
+        │     └─ semanticCache.set (memory + debounced flush)
         ├─ re-rank by role-bonus                 │
         └─ render Markdown                       │
         ↓
@@ -739,21 +761,25 @@ Show concrete examples of using this Skill.
         write SKILL.md / AGENT.md + updateNode
 ```
 
+**Persistence target:** `.agent-graph/state.json` *inside the picked project folder*, written atomically via `codeIntel/stateIO.ts`. The semantic cache lives as `state.semantic: Record<entityId, SemanticInfo>` — same shape as the in-memory map, persisted on every enrichment with a debounced flush (≈400 ms) so a 10-entity batch doesn't trigger 10 full state.json rewrites.
+
+**Folder-bound lifecycle:** `setDirectory(dir)` from `GraphCanvas` re-binds the cache to whichever folder is currently picked (subscribed via `useFileSystemStore.directory`). Switching folders triggers a fresh `loadFromDB()` from the new folder's `state.semantic`. The cache no longer touches IndexedDB — `idb-keyval` has been removed as a dependency.
+
 #### Файлы
 
 | Файл | Роль |
 |---|---|
-| `src/services/semanticCache.ts` | Кеш `entityId → {role, description, timestamp}`: in-memory `Map` + IDB (через `idb-keyval`, store `'agent-designer-semantic-cache'`). API: `getSync`, `setSync`, `loadFromDB`, `persistToDB`, `get`, `set`, `clear`, `size`. |
+| `src/services/semanticCache.ts` | Singleton с in-memory `Map<entityId, SemanticInfo>` + persistence через `.agent-graph/state.json`. API: `setDirectory`, `getDirectory`, `getSync`, `setSync`, `loadFromDB`, `get`, `set`, `flush`, `clear`, `size`. `set` пишет в memory немедленно + шедулит debounced flush. `flush` принудительно пишет на диск (await'ит in-flight). `clear` стирает memory + `state.semantic` на диске. |
 | `src/services/semanticEnricher.ts` | `enrichEntity(entity)` → `SemanticInfo`. Кеш → Qwen → парсер → кеш. `enrichEntities(entities, onProgress)` — последовательно, репортит прогресс. Fallback: `{ role: 'unknown', description: 'Не удалось определить' }` при любой ошибке. |
-| `src/services/treeSitter/contextCollector.ts` | (обновлено) — `collectContextForNode` теперь async, принимает `onProgress`. Делит candidate'ов на `enrichPoolSize` (default 15), просит обогащение, ре-ранкирует по признанной роли и рендерит Markdown с `**Role:**` + `**Summary:**` блоками. |
+| `src/services/codeIntel/contextCollector.ts` | (обновлено) — `collectContextForNode` теперь async, принимает `onProgress`. Делит candidate'ов на `enrichPoolSize` (default 15), просит обогащение, ре-ранкирует по признанной роли и рендерит Markdown с `**Archetype:**` + `**Semantic role:**` + `**Summary:**` + `**Modifiers:**` + `**Annotations:**` блоками. |
 | `src/services/instructionGenerator.ts` | `buildPromptForNode` стал async. Принимает `codeGraph` + `onEnrichmentProgress` в input. Если `codeGraph` пуст — context блок пропускается. Если передан `precomputedCodeContext` — используется verbatim (полезно для тестов). **Промпт перестроен так, чтобы Qwen использовал `## Project Code Context` как источник примеров**: context-блок перенесён сразу перед "Required Body Sections", добавлен блок `**PRIMARY ANCHOR:**` указывающий на entity чьё имя совпадает с `functionName` скила (или slug label), `## Examples` для skills помечен как REQUIRED и привязан синтаксисом к блоку context (`MUST use the EXACT symbols (function / class / method names, parameter names, return shapes) you saw in ## Project Code Context`). |
-| `src/components/InstructionGeneratorDialog.tsx` | Новый state `enrichment { current, total, entityName, phase }`. Кнопка показывает `Анализирую N/M · <entity>` во время enrichment и `Генерирую…` во время основного вызова. |
-| `src/components/CodeGraphToolbarButton.tsx` | Clear-button теперь также зовёт `semanticCache.clear()` чтобы не использовать кэш на новом проекте. |
-| `src/components/GraphCanvas.tsx` | `useEffect` дополнительно вызывает `semanticCache.loadFromDB()` при старте. |
+| `src/components/InstructionGeneratorDialog.tsx` | Новый state `enrichment { current, total, entityName, phase }`. Кнопка показывает `Анализирую N/M · <entity>` во время enrichment и `Генерирую…` во время основного вызова. `handleClose` обёртка вокруг `onClose` — flush'ит кеш при Escape / X / backdrop / Cancel. Save-button тоже идёт через `handleClose`. |
+| `src/components/CodeGraphToolbarButton.tsx` | Clear-button сначала зовёт `semanticCache.flush()`, потом `semanticCache.clear()`, потом `reset()` — чтобы pending записи не потерялись. |
+| `src/components/GraphCanvas.tsx` | Подписан на `useFileSystemStore.directory`. На смену директории → `setDirectory(newDir)` + `loadFromDB()`. На `pagehide` / `beforeunload` → `flush()` (внутри `semanticCache.ts`). |
 
 #### Step-by-step
 
-1. **Гидрация при старте** (`GraphCanvas`): вызов `semanticCache.loadFromDB()` подтягивает все IDB-записи в `Map` (memory-first).
+1. **Привязка к директории** (`GraphCanvas`): `useEffect` следит за `useFileSystemStore.directory`; на смену → `semanticCache.setDirectory(dir)` + `loadFromDB()` (читает `state.semantic` из `<dir>/.agent-graph/state.json`).
 2. **Клик Generate**: dialog ставит `enrichment.phase = 'enriching'` и зовёт `buildPromptForNode(node, userRequest, { codeGraph, onEnrichmentProgress })`.
 3. **`buildPromptForNode`**: проверяет `codeGraph.entitiesById`. Если пуст — context блок пропускается; иначе зовёт `collectContextForNode`.
 4. **`collectContextForNode`**:
@@ -763,18 +789,20 @@ Show concrete examples of using this Skill.
    - После enrichment — re-rank: узнанная роль (`≠ 'unknown'`) даёт +5, непустое описание даёт +1.
    - Top-10 попадают в рендер.
 5. **`enrichEntities` → `enrichEntity`** для каждой сущности:
-   - `semanticCache.get(entityId)` — id, синхронно in-memory, иначе IDB, hydrate memory по попаданию.
+   - `semanticCache.get(entityId)` — синхронный read из in-memory Map.
    - Hit → возврат, без сетевого вызова.
    - Miss → `qwenClient.generateViaQwen(buildEnrichmentPrompt(entity))`.
    - Промпт включает `name`, `kind`, `signature`, обрезанное до 2000 символов `bodySnippet`, `docComment`. В конце требуемый формат ответа: `РОЛЬ: <word>` + `ОПИСАНИЕ: <sentence>`.
-   - Парсер ловит обе строки регэкспом `^\s*РОЛЬ\s*:\s*(.+?)\s*$` / `^\s*ОПИСАНИЕ\s*:\s*(.+?)\s*$` (case-insensitive).
+   - Парсер ловит обе строки регэкспом `^\s*РОЛЬ\s*:\s*(.+?)\s*$` / `^\s*ОПИСАНИЕ\s*:\s*(.+?)\s*$` (case-insensitive, ловит и `РОЛЬ`, и латинскую транслитерацию).
    - Роль нормализуется через whitelist (`controller`, `service`, `repository`, `factory`, `adapter`, `configuration`, `entity`, `dto`, `mapper`, `handler`, `validator`, `utility`, `middleware`, `guard`, `filter`, `resolver`, `provider`, `helper`, `composable`, `hook`, `unknown`) — всё остальное падает в `unknown`.
    - Описание клипается до 100 символов.
    - Любая ошибка → fallback `SemanticInfo { role: 'unknown', description: <message> }`.
-6. **`semanticCache.set(info)`** пишет в memory + IDB (через `idb-keyval.get/set`).
+6. **`semanticCache.set(info)`** пишет в in-memory Map и шедулит `setTimeout(doFlush, 400ms)` — на flush'е читает `state.json`, мержит `state.semantic = {…memory}`, пишет атомарно (tmp + rename) через `saveAgentState`. Если flush уже in-flight — новые записи попадут в следующий.
 7. **`buildPromptForNode`** получает готовый Markdown и вставляет под `## Project Code Context`.
 8. Dialog переходит в `phase = 'generating'`, делает `generateViaQwen(prompt)` (как раньше).
 9. Ответ приходит → standard flow (template alignment, save).
+10. **Закрытие диалога**: `handleClose` сначала `await semanticCache.flush()`, потом `onClose()` — гарантирует, что pending записи попали на диск до размонтирования.
+11. **Page hide / reload**: глобальный `pagehide`+`beforeunload` listener в `semanticCache.ts` зовёт `flush()` без await — синхронная запись невозможна, но event-loop добросовестно попытается.
 
 #### Когда `cache` не помогает
 
@@ -782,21 +810,25 @@ Show concrete examples of using this Skill.
 - **`enrichPoolSize = 0`** или `skipEnrich: true` — сущности пройдут с приглушённым placeholder'ом.
 - **Парсер не вытащил `ОПИСАНИЕ`** — description становится `'Не удалось распарсить ответ Qwen'`, role — как обычно.
 - **Нет entities в pool** (мало матчей по имени) — context блок опускается целиком.
+- **Юзер ещё не выбрал папку** — `setDirectory(null)`; `loadFromDB()` возвращает 0; flush'и no-op. Кеш живёт только в памяти до смены папки (потеряется при reload).
 
 #### Failure modes
 
 | Симптом | Поведение |
 |---|---|
 | Qwen упал в середине enrichment | Loops incomplete, возвращаются fallback'и, генерация всё равно продолжается |
-| Браузер без IDB | `idb-keyval` генерирует exception → ловится в `semanticCache`, in-memory-only |
-| Кеш устарел после Clear | `semanticCache.clear()` стирает и IDB, и memory |
+| Папка недоступна для записи | `saveAgentState` бросит → `flush` ловит, в memory остаётся, повторная попытка на следующем `set` |
+| `state.json` не существует (юзер не запускал scan) | `loadOrBootstrap` создаёт минимальный state skeleton с пустым `semantic`; flush пишет этот skeleton — на следующий scan `analyzeProject` перезапишет, не потеряв semantic |
+| Кеш устарел после Clear | `semanticCache.clear()` стирает и in-memory, и `state.semantic` |
 | Одну и ту же сущность попросили разные ноды | Один enrichment-кэш на entityId, всё ОК |
+| Сменили папку посреди enrichment | in-memory cache перезаписывается следующим `loadFromDB()`; pending flush для старой папки отменяется через `setDirectory`'s `scheduleFlush` (новая директория становится целью) |
 
 #### Метрики
 
 - Типичный сценарий: 5–15 матчей → большая часть из кеша после первого скана.
 - Холодный старт: ≈ N × 1–3 s для N свежих сущностей (sequential CLI).
-- IDB cache hit-ratio: после первого дня использования стремится к 100%.
+- Cache hit-ratio: после первого дня использования проекта стремится к 100%.
+- I/O: один полный state.json write на батч enrichment (debounced 400 ms), не на каждую entity.
 
 ---
 
@@ -804,14 +836,12 @@ Show concrete examples of using this Skill.
 
 ```sh
 npm install
-node scripts/fetch-grammars.cjs   # вендорит WASM в public/grammars/
 
 npm run dev        # vite @ :5173, /generate middleware активен
 npm run build      # tsc -b + vite build → dist/
 npm run prod       # node server/prod-server.mjs @ :3001 (dist/ + /generate)
 npm run server     # build && prod
 npm run preview    # vite preview @ :4173, /generate middleware активен
-npm run grammars   # обновить public/grammars/*.wasm
 npm run lint       # oxlint
 
 # Регенерировать base-config.json:
@@ -882,13 +912,13 @@ Environment overrides (все опциональны):
 - `buildPromptForNode` — расширить секцию «Required Frontmatter».
 - `<ValidationChip>` подсветит `missing <key>` без дополнительной правки.
 
-### 14.6 Добавить новый язык в tree-sitter
+### 14.6 Добавить новый язык в code-intel
 
-1. `scripts/fetch-grammars.cjs` → `LANGUAGE_GRAMMARS` (repo, asset, tag, env-var).
-2. `npm run grammars`.
-3. `services/treeSitter/loader.ts` → `GRAMMARS[<lang>]` (extensions + url).
-4. `tsExtractor.ts` — добавить правила для своего AST (если хочется лучше regex'а).
-5. `regexExtractor.ts` — добавить regex-правила как fallback.
+1. `services/codeIntel/types.ts` → `LANGUAGES[<lang>]` (extensions, `langClass: 'brace' | 'indent' | 'markup'`, tag, name). Если язык brace-based — переиспользует существующий `extractBraceLanguage`. Если indent-based — `extractIndentLanguage`. Если markup — только detection, без извлечения сущностей.
+2. Если нужен собственный path walker (например, для Haskell-like offside-rule) — добавить новый файл в `services/codeIntel/extractors/` и зарегистрировать в `layer.ts → extractEntitiesForFile`.
+3. `archetypeLearner.ts` — если язык имеет специфические аннотации/маркеры (как Kotlin `@RestController`), добавить их в `architecture.ts → staticArchetypeFromAnnotations`.
+4. `conventions.ts` — если у языка особые naming-стили (например, kebab-case для Elixir), добавить detector.
+5. UI: `CodeEntity.language` теперь автоматически появится в stats-byLanguage и в фильтрах поиска.
 
 ### 14.7 Заменить FS Access API на полноценную VFS
 

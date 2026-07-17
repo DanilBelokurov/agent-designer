@@ -1,19 +1,26 @@
-// Maps an agent-graph node onto the most relevant code-graph entities and
-// builds a Markdown-flavoured context snippet for the instruction prompt.
+// Maps an agent-graph node onto the most relevant entities from
+// `.agent-graph/state.json` and builds a Markdown-flavoured context snippet
+// for the instruction prompt.
 //
 // Async — enriches each picked entity through the local Qwen CLI (or its
 // cache) before rendering. Calls are sequential and report progress via
 // the optional `onProgress` callback.
+//
+// The Markdown block surfaces the new code-intel fields so the prompt
+// grounds Qwen in:
+//   - signature + body (ground truth),
+//   - archetype (controller / service / repository / …) learned per
+//     package or recovered from static heuristics,
+//   - modifiers / annotations (Kotlin/Java style labels),
+//   - semantic role + description (Qwen-derived).
 
 import type { AppNode } from '../../types';
-import type { CodeEntity } from './codeGraph';
-import type { CodeGraphSnapshot } from './codeGraphStore';
-import { entitiesByKind } from './codeGraphStore';
-import type { SemanticInfo } from '../semanticCache';
+import type { AgentState, CodeEntity } from './types';
+import type { SemanticInfo } from './types';
 import { enrichEntities } from '../semanticEnricher';
 
 const DEFAULT_LIMIT = 10;       // how many snippets land in the prompt
-const RELEVANT_POOL_SIZE = 15;  // how many candidates to enrich (cheaper than every match)
+const RELEVANT_POOL_SIZE = 15;  // how many candidates to enrich
 
 function normalise(value: string): string {
   return value
@@ -45,7 +52,7 @@ function codeNameCandidates(node: AppNode): string[] {
 }
 
 function scoreEntity(entity: CodeEntity, candidates: string[]): number {
-  if (entity.kind === 'file' || entity.kind === 'module') return -1;
+  if (entity.kind === 'file' || entity.kind === 'unknown') return -1;
   const name = normalise(entity.name);
   let score = 0;
   for (const cand of candidates) {
@@ -73,23 +80,77 @@ export interface CollectOptions {
   onProgress?: (current: number, total: number, entityName: string, info: SemanticInfo) => void;
 }
 
-function languageTag(lang: string | undefined, fallback = 'ts'): string {
-  if (lang === 'python') return 'python';
-  if (lang === 'javascript' || lang === 'typescript' || lang === 'tsx') return fallback;
-  if (lang === 'tsx') return 'tsx';
-  return '';
+function languageTag(lang: string | undefined): string {
+  if (!lang) return '';
+  switch (lang) {
+    case 'python':
+      return 'python';
+    case 'kotlin':
+    case 'java':
+    case 'scala':
+    case 'groovy':
+      return lang;
+    case 'csharp':
+      return 'csharp';
+    case 'go':
+      return 'go';
+    case 'rust':
+      return 'rust';
+    case 'ruby':
+      return 'ruby';
+    case 'javascript':
+      return 'javascript';
+    case 'tsx':
+      return 'tsx';
+    case 'typescript':
+      return 'ts';
+    default:
+      return '';
+  }
+}
+
+function renderEntityBlock(entity: CodeEntity, info: SemanticInfo): string[] {
+  const lines: string[] = [];
+  lines.push(`### ${entity.signature ?? `${entity.kind} ${entity.name}`}`);
+
+  if (entity.archetype) {
+    lines.push(`- **Archetype:** \`${entity.archetype}\`${entity.archetypeConfidence ? ` (${entity.archetypeConfidence})` : ''}`);
+  }
+  lines.push(`- **Semantic role:** \`${info.role}\``);
+  lines.push(`- **Summary:** ${info.description || '(no description)'}`);
+
+  if (entity.modifiers && entity.modifiers.length) {
+    lines.push(`- **Modifiers:** \`${entity.modifiers.join(' ')}\``);
+  }
+  if (entity.annotations && entity.annotations.length) {
+    lines.push(`- **Annotations:** ${entity.annotations.map((a) => '`' + a + '`').join(' ')}`);
+  }
+
+  lines.push(`- **File:** \`${entity.filePath}\`${entity.startLine !== undefined ? `, line ${entity.startLine + 1}` : ''}`);
+  if (entity.docComment) {
+    lines.push(`- **Doc comment:**`);
+    lines.push(`  ${entity.docComment.replace(/\n/g, '\n  ')}`);
+  }
+  if (entity.bodySnippet) {
+    const tag = languageTag(entity.language);
+    lines.push('');
+    if (tag) lines.push('```' + tag, entity.bodySnippet, '```');
+    else lines.push('```', entity.bodySnippet, '```');
+  }
+  lines.push('');
+  return lines;
 }
 
 export async function collectContextForNode(
   node: AppNode,
-  graph: CodeGraphSnapshot,
+  state: AgentState,
   options: CollectOptions = {},
 ): Promise<CollectedContext> {
   const maxSnippets = options.maxSnippets ?? DEFAULT_LIMIT;
   const poolSize = options.enrichPoolSize ?? RELEVANT_POOL_SIZE;
   const candidates = codeNameCandidates(node);
 
-  const matched = Object.values(graph.entitiesById)
+  const matched = state.entities
     .map((e) => ({ e, score: scoreEntity(e, candidates) }))
     .filter((x) => x.score > 0)
     .sort((a, b) => b.score - a.score)
@@ -133,26 +194,12 @@ export async function collectContextForNode(
 
   const lines: string[] = [
     `The user is documenting the **${node.type.replace('_', ' ')}** node labelled "${node.label}".`,
-    `Found ${picked.length} code entity(ies) below, each annotated by a local Qwen call with role + short description.`,
+    `Found ${picked.length} code entity(ies) below, each annotated by a local Qwen call with role + short description, and tagged with the file's archetype (controller / service / repository / …) when known.`,
     '',
   ];
 
   for (const { entity, info } of picked) {
-    lines.push(`### ${entity.signature ?? `${entity.kind} ${entity.name}`}`);
-    lines.push(`- **Role:** \`${info.role}\``);
-    lines.push(`- **Summary:** ${info.description || '(no description)'}`);
-    lines.push(`- **File:** \`${entity.filePath}\`${entity.startLine !== undefined ? `, line ${entity.startLine + 1}` : ''}`);
-    if (entity.docComment) {
-      lines.push(`- **Doc comment:**`);
-      lines.push(`  ${entity.docComment.replace(/\n/g, '\n  ')}`);
-    }
-    if (entity.bodySnippet) {
-      const tag = languageTag(entity.language);
-      lines.push('');
-      if (tag) lines.push('```' + tag, entity.bodySnippet, '```');
-      else lines.push('```', entity.bodySnippet, '```');
-    }
-    lines.push('');
+    lines.push(...renderEntityBlock(entity, info));
   }
 
   return {
@@ -162,14 +209,14 @@ export async function collectContextForNode(
   };
 }
 
-export function graphNotEmpty(graph: CodeGraphSnapshot): boolean {
-  return Object.keys(graph.entitiesById).length > 0;
+export function graphNotEmpty(state: AgentState | null): boolean {
+  return !!state && state.entities.length > 0;
 }
 
-export function summarise(graph: CodeGraphSnapshot): string {
-  const byKind = entitiesByKind(graph);
+export function summarise(state: AgentState | null): string {
+  if (!state) return '';
   const parts: string[] = [];
-  for (const [kind, n] of Object.entries(byKind)) {
+  for (const [kind, n] of Object.entries(state.stats.byKind)) {
     parts.push(`${n} ${kind}`);
   }
   return parts.join(', ');

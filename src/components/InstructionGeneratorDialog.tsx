@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { X, Sparkles, FolderTree, Download, Save, AlertCircle, Loader2, Code2 } from 'lucide-react';
 import type { Node, Edge } from 'reactflow';
 
@@ -23,6 +23,7 @@ import {
   writeInstructionToDisk,
 } from '../services/fileSystem';
 import { QwenUnavailableError, generateViaQwen } from '../services/qwenClient';
+import { semanticCache } from '../services/semanticCache';
 
 interface InstructionGeneratorDialogProps {
   node: Node;
@@ -79,14 +80,20 @@ export default function InstructionGeneratorDialog({
     [node.id, nodeType, node.data.label, config],
   );
 
+  /** Close + flush any pending semantic writes to .agent-graph/state.json. */
+  const handleClose = useCallback(() => {
+    void semanticCache.flush();
+    onClose();
+  }, [onClose]);
+
   useEffect(() => {
     requestRef.current?.focus();
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') handleClose();
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [handleClose]);
 
   // Try to load existing instruction from disk on mount
   useEffect(() => {
@@ -124,9 +131,9 @@ export default function InstructionGeneratorDialog({
     [edges, node.id, nodes],
   );
 
-  const codeGraph = useCodeGraphStore((s) => s.graph);
+  const codeState = useCodeGraphStore((s) => s.state);
   const codePhase = useCodeGraphStore((s) => s.phase);
-  const codeStats = useMemo(() => describeGraph(codeGraph), [codeGraph]);
+  const codeStats = useMemo(() => describeGraph(codeState), [codeState]);
 
   /** Currently-enriching entity progress (null when not enriching). */
   const [enrichment, setEnrichment] = useState<
@@ -144,7 +151,7 @@ export default function InstructionGeneratorDialog({
       const prompt = await buildPromptForNode(appNode, userRequest, {
         upstreamSummary: upstream.length ? upstream.join(', ') : undefined,
         downstreamSummary: downstream.length ? downstream.join(', ') : undefined,
-        codeGraph,
+        codeState,
         onEnrichmentProgress: (current, total, entityName) => {
           setEnrichment({ current, total, entityName, phase: 'enriching' });
         },
@@ -233,7 +240,7 @@ export default function InstructionGeneratorDialog({
         setSavedPath(relativePath);
       }
       applyToConfig(draft, writtenPath);
-      onClose();
+      handleClose();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
@@ -246,7 +253,7 @@ export default function InstructionGeneratorDialog({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4"
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) handleClose();
       }}
     >
       <div
@@ -271,7 +278,7 @@ export default function InstructionGeneratorDialog({
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors"
             aria-label="Close"
           >
@@ -411,7 +418,7 @@ export default function InstructionGeneratorDialog({
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={onClose}
+              onClick={handleClose}
               className="px-4 py-2 text-sm bg-slate-800/50 hover:bg-slate-700/50 border border-slate-700/50 text-slate-300 rounded-xl transition-colors"
             >
               Cancel

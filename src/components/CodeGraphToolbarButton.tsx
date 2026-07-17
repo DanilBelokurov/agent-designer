@@ -1,4 +1,4 @@
-// Floating panel anchored to the canvas. Surfaces the code-graph state and
+// Floating panel anchored to the canvas. Surfaces the code-intel state and
 // offers a quick "scan now" action. Uses the existing FileSystem-directory
 // handle from `useFileSystemStore` so the user doesn't have to re-pick a folder.
 
@@ -7,31 +7,45 @@ import { Code2, Play, Loader2, RotateCcw, FileSearch, X } from 'lucide-react';
 
 import { useFileSystemStore } from '../store/useFileSystemStore';
 import { useCodeGraphStore, describeGraph, findMatchingEntities } from '../store/useCodeGraphStore';
-import { scanProjectDirectory } from '../services/treeSitter/folderScanner';
+import { analyzeProject, type AnalyzeProgress } from '../services/codeIntel/layer';
 import { pickProjectDirectory } from '../services/fileSystem';
-import { mergeParseResult } from '../services/treeSitter/codeGraphStore';
 import { semanticCache } from '../services/semanticCache';
+
+function toProgressSnapshot(p: AnalyzeProgress) {
+  return {
+    phase: p.phase,
+    current: p.current,
+    total: p.total,
+    detail: p.detail,
+    scanned: p.current,
+    matched: p.current,
+    errors: 0,
+    currentFile: p.detail,
+  };
+}
 
 export default function CodeGraphToolbarButton() {
   const directory = useFileSystemStore((s) => s.directory);
   const setDirectory = useFileSystemStore((s) => s.setDirectory);
 
-  const graph = useCodeGraphStore((s) => s.graph);
+  const state = useCodeGraphStore((s) => s.state);
   const phase = useCodeGraphStore((s) => s.phase);
   const error = useCodeGraphStore((s) => s.error);
   const progress = useCodeGraphStore((s) => s.progress);
-  const parserUsed = useCodeGraphStore((s) => s.parserUsed);
+  const parser = useCodeGraphStore((s) => s.parser);
+  const cacheHit = useCodeGraphStore((s) => s.cacheHit);
 
   const setProgress = useCodeGraphStore((s) => s.setProgress);
   const setPhase = useCodeGraphStore((s) => s.setPhase);
-  const setParser = useCodeGraphStore((s) => s.setParserUsed);
-  const replaceGraph = useCodeGraphStore((s) => s.replaceGraph);
+  const setParser = useCodeGraphStore((s) => s.setParser);
+  const setCacheHit = useCodeGraphStore((s) => s.setCacheHit);
+  const replaceState = useCodeGraphStore((s) => s.replaceState);
   const reset = useCodeGraphStore((s) => s.reset);
 
   const [open, setOpen] = useState(false);
   const [scanSearch, setScanSearch] = useState('');
 
-  const stats = describeGraph(graph);
+  const stats = describeGraph(state);
 
   const beginScan = async () => {
     let dir = directory;
@@ -47,31 +61,23 @@ export default function CodeGraphToolbarButton() {
       }
     }
     setPhase('scanning');
-    setProgress({ scanned: 0, matched: 0, skipped: 0, errors: 0 });
+    setProgress({ phase: 'reading', current: 0, total: 0, scanned: 0, matched: 0, errors: 0 });
     try {
-      const result = await scanProjectDirectory(dir, graph, {
-        onProgress: (p) => setProgress({
-          scanned: p.scanned,
-          matched: p.matched,
-          skipped: p.skipped,
-          errors: p.errors,
-          currentFile: p.currentFile,
-        }),
+      const result = await analyzeProject(dir, {
+        onProgress: (p) => setProgress(toProgressSnapshot(p)),
       });
-      await replaceGraph({ ...graph, rootPath: dir.name, parsedAt: new Date().toISOString() });
-      setParser('tree-sitter');
-      setPhase(result.errors > 0 ? 'done' : 'done');
+      await replaceState(result.state);
+      setParser('code-intel');
+      setCacheHit(result.cacheHit);
+      setPhase('done');
     } catch (e) {
       setPhase('error', e instanceof Error ? e.message : String(e));
     }
   };
 
   const matches = scanSearch.trim()
-    ? findMatchingEntities(graph, scanSearch.trim()).slice(0, 8)
+    ? findMatchingEntities(state, scanSearch.trim()).slice(0, 8)
     : [];
-
-  // Suppress unused: kept for symmetry with other parts of the app.
-  void mergeParseResult;
 
   return (
     <>
@@ -103,9 +109,20 @@ export default function CodeGraphToolbarButton() {
             <div className="flex items-center gap-2 text-sm">
               <Code2 className="w-4 h-4 text-emerald-400" />
               <span className="font-semibold text-white">Code graph</span>
-              {parserUsed && (
+              {parser && (
                 <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-700/60 text-slate-300">
-                  {parserUsed}
+                  {parser}
+                </span>
+              )}
+              {cacheHit != null && (
+                <span
+                  className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                    cacheHit
+                      ? 'bg-amber-500/20 text-amber-300'
+                      : 'bg-sky-500/20 text-sky-300'
+                  }`}
+                >
+                  {cacheHit ? 'cached' : 'fresh'}
                 </span>
               )}
             </div>
@@ -161,8 +178,11 @@ export default function CodeGraphToolbarButton() {
               <button
                 type="button"
                 onClick={() => {
-                  void semanticCache.clear();
-                  reset();
+                  void (async () => {
+                    await semanticCache.flush();
+                    await semanticCache.clear();
+                    await reset();
+                  })();
                 }}
                 disabled={stats.totalEntities === 0}
                 className="px-3 py-2 rounded-xl border border-slate-700/50 bg-slate-800/40 text-slate-300 hover:text-white text-sm disabled:opacity-40"
@@ -175,18 +195,18 @@ export default function CodeGraphToolbarButton() {
               <div className="text-[11px] text-slate-400">
                 <div className="flex justify-between">
                   <span>
-                    {progress.scanned} scanned · {progress.matched} matched · {progress.errors} errors
+                    {progress.phase} · {progress.current}/{progress.total}
                   </span>
                   <span className="truncate max-w-[60%] text-emerald-300">
-                    {progress.currentFile ?? ''}
+                    {progress.detail ?? progress.currentFile ?? ''}
                   </span>
                 </div>
                 <div className="mt-1 h-1 bg-slate-800 rounded overflow-hidden">
                   <div
                     className="h-full bg-emerald-500 transition-all"
                     style={{
-                      width: progress.matched > 0
-                        ? `${Math.min(100, ((progress.scanned - progress.skipped) / Math.max(1, progress.scanned)) * 100)}%`
+                      width: progress.total > 0
+                        ? `${Math.min(100, (progress.current / progress.total) * 100)}%`
                         : '0%',
                     }}
                   />
@@ -222,6 +242,11 @@ export default function CodeGraphToolbarButton() {
                       <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] uppercase">
                         {e.kind}
                       </span>
+                      {e.archetype && (
+                        <span className="px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 text-[10px] uppercase">
+                          {e.archetype}
+                        </span>
+                      )}
                       <span className="text-white font-mono truncate flex-1">{e.name}</span>
                       <span className="text-[10px] text-slate-500 truncate max-w-[40%]">
                         {e.filePath}:{e.startLine + 1}
@@ -234,9 +259,9 @@ export default function CodeGraphToolbarButton() {
 
             {stats.totalEntities === 0 && phase !== 'scanning' && (
               <div className="text-[11px] text-slate-500 italic">
-                Pick a project folder first via the instruction dialog, then run a scan. Tree-sitter extracts
-                classes, functions, methods, interfaces and imports; if its WASM grammar is missing the regex
-                fallback is used so the panel is still useful.
+                Pick a project folder first via the instruction dialog, then run a scan. The universal
+                code-intel extractor picks up classes, functions, methods, interfaces, and imports
+                across the supported languages — no per-language runtime needed.
               </div>
             )}
           </div>

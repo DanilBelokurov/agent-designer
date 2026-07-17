@@ -10,10 +10,9 @@
 // output against the template's expected fields.
 
 import type { AppNode } from '../types';
-import type { CodeGraphSnapshot } from './treeSitter/codeGraphStore';
-import type { CodeEntity } from './treeSitter/codeGraph';
+import type { AgentState, CodeEntity } from './codeIntel/types';
 import type { SemanticInfo } from './semanticCache';
-import { collectContextForNode } from './treeSitter/contextCollector';
+import { collectContextForNode } from './codeIntel/contextCollector';
 import agentTemplate from '../../templates/agent-template.md?raw';
 import skillTemplate from '../../templates/skill-template.md?raw';
 
@@ -202,8 +201,8 @@ export function validateAgentFrontmatter(parsed: FrontmatterValidation) {
 interface BuildPromptInput {
   upstreamSummary?: string;
   downstreamSummary?: string;
-  /** Code-graph snapshot — when provided, the relevant entities are enriched via Qwen and rendered into the prompt. */
-  codeGraph?: CodeGraphSnapshot;
+  /** Code-intel `AgentState` — when provided, the relevant entities are enriched via Qwen and rendered into the prompt. */
+  codeState?: AgentState | null;
   /**
    * Skip the live enrichment step and reuse this Markdown verbatim under
    * "Project Code Context". Useful for testing or when callers already
@@ -279,8 +278,8 @@ export async function buildPromptForNode(
 
   if (input.precomputedCodeContext !== undefined) {
     codeContextMarkdown = input.precomputedCodeContext ?? null;
-  } else if (input.codeGraph && Object.keys(input.codeGraph.entitiesById).length > 0) {
-    const collected = await collectContextForNode(node, input.codeGraph, {
+  } else if (input.codeState && input.codeState.entities.length > 0) {
+    const collected = await collectContextForNode(node, input.codeState, {
       enrichPoolSize: input.enrichPoolSize,
       onProgress: input.onEnrichmentProgress,
     });
@@ -301,9 +300,10 @@ export async function buildPromptForNode(
   if (codeContextMarkdown && codeContextMarkdown.trim()) {
     lines.push(
       '## Project Code Context',
-      'Real code extracted from the project folder by a tree-sitter scan, ' +
-        'annotated by Qwen with role + short description. Treat signatures, doc comments, ' +
-        'and bodies as ground truth for naming, parameter shapes, behaviour, and edge cases.',
+      'Real code extracted from the project folder by the universal code-intel extractor, ' +
+        'annotated by Qwen with role + short description, and tagged with the file archetype ' +
+        '(controller / service / repository / mapper / …) learned per package. Treat signatures, ' +
+        'doc comments, and bodies as ground truth for naming, parameter shapes, behaviour, and edge cases.',
       '',
     );
     if (anchorEntity) {

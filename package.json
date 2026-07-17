@@ -7,18 +7,15 @@
     "dev": "vite",
     "server": "npm run build && node server/prod-server.mjs",
     "prod": "node server/prod-server.mjs",
-    "grammars": "node scripts/fetch-grammars.cjs",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview"
   },
   "dependencies": {
-    "idb-keyval": "^6.3.0",
     "lucide-react": "^1.24.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "reactflow": "^11.11.4",
-    "web-tree-sitter": "^0.26.11",
     "zustand": "^5.0.14"
   },
   "devDependencies": {
