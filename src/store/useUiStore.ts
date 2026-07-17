@@ -1,7 +1,9 @@
 // Tiny UI-only store: tracks which left-panel tab is active so that the
 // canvas can switch between rendering the agent-graph (Harness tab) and
 // the code-graph (Graph tab). Also owns the graphFilters used by the
-// code-graph canvas to hide nodes/edges the user doesn't want to see.
+// code-graph canvas to hide nodes/edges the user doesn't want to see,
+// and the set of currently-collapsed compound nodes (class/interface/
+// enum/object/companion) so the canvas only renders their headers.
 
 import { create } from 'zustand';
 import type { EntityKind, RelationKind } from '../services/codeIntel/types';
@@ -17,13 +19,15 @@ export interface GraphFilters {
 }
 
 const DEFAULT_FILTERS: GraphFilters = {
+  // By default we keep only architecturally-meaningful kinds. Detailed
+  // kinds (field, parameter, constant, variable, module, type) are
+  // hidden — toggleable in the Filters panel.
   kinds: new Set<EntityKind>([
     'class', 'interface', 'enum', 'object', 'companion',
-    'function', 'method', 'field', 'constant', 'parameter',
+    'function', 'method',
   ]),
   relations: new Set<RelationKind>([
     'inherits', 'implements', 'calls', 'imports', 'extension_of',
-    'returns', 'has_parameter', 'field_of', 'references',
   ]),
   languages: new Set<string>(),
   archetypes: new Set<string>(),
@@ -32,6 +36,10 @@ const DEFAULT_FILTERS: GraphFilters = {
 interface UiState {
   leftTab: LeftTab;
   graphFilters: GraphFilters;
+  /** Compound node ids (class/interface/...) the user has collapsed. */
+  compoundsCollapsed: Set<string>;
+  /** Whether auto-layout should be applied automatically on next render. */
+  autoLayoutRequested: number;
 
   setLeftTab: (tab: LeftTab) => void;
   resetToHarness: () => void;
@@ -42,6 +50,11 @@ interface UiState {
   toggleFilterArchetype: (archetype: string) => void;
   setFilterLanguages: (languages: string[]) => void;
   resetFilters: () => void;
+
+  toggleCompoundCollapse: (id: string) => void;
+  expandAllCompounds: () => void;
+  collapseAllCompounds: (ids: string[]) => void;
+  requestAutoLayout: () => void;
 }
 
 function toggleSet<T>(s: Set<T>, value: T): Set<T> {
@@ -54,6 +67,8 @@ function toggleSet<T>(s: Set<T>, value: T): Set<T> {
 export const useUiStore = create<UiState>((set) => ({
   leftTab: 'harness',
   graphFilters: DEFAULT_FILTERS,
+  compoundsCollapsed: new Set<string>(),
+  autoLayoutRequested: 0,
 
   setLeftTab: (tab) => {
     logger.info('ui.tab.switch', { tab });
@@ -83,6 +98,12 @@ export const useUiStore = create<UiState>((set) => ({
     logger.info('filter.reset');
     set({ graphFilters: DEFAULT_FILTERS });
   },
+
+  toggleCompoundCollapse: (id) =>
+    set((s) => ({ compoundsCollapsed: toggleSet(s.compoundsCollapsed, id) })),
+  expandAllCompounds: () => set({ compoundsCollapsed: new Set() }),
+  collapseAllCompounds: (ids) => set({ compoundsCollapsed: new Set(ids) }),
+  requestAutoLayout: () => set((s) => ({ autoLayoutRequested: s.autoLayoutRequested + 1 })),
 }));
 
 export const ALL_KINDS: ReadonlyArray<EntityKind> = [
