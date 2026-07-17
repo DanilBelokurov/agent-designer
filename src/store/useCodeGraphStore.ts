@@ -22,6 +22,7 @@ import {
   loadAgentState,
   saveAgentState,
 } from '../services/codeIntel/stateIO';
+import { logger } from '../services/logger';
 
 export type ScanPhase = 'idle' | 'scanning' | 'done' | 'error' | 'cancelled';
 
@@ -120,6 +121,7 @@ export const useCodeGraphStore = create<CodeGraphUIState>((set) => ({
   },
 
   setDirectory: async (dir) => {
+    logger.info('directory.set', { name: dir?.name ?? null, handle: !!dir });
     set({
       state: null,
       phase: 'idle',
@@ -133,13 +135,22 @@ export const useCodeGraphStore = create<CodeGraphUIState>((set) => ({
     try {
       const loaded = await loadAgentState(dir);
       if (loaded) {
+        logger.info('directory.stateLoaded', {
+          entities: loaded.entities.length,
+          relations: loaded.relations.length,
+          fingerprint: loaded.projectFingerprint,
+          rootPath: loaded.rootPath,
+        });
         set({ state: loaded, cacheHit: true });
       } else {
+        logger.info('directory.noState', { name: dir.name });
         set({ cacheHit: false });
       }
     } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn('[useCodeGraphStore] loadAgentState failed:', err);
+      logger.warn('directory.loadFailed', {
+        name: dir.name,
+        message: err instanceof Error ? err.message : String(err),
+      });
       set({ cacheHit: false });
     }
   },

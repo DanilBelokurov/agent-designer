@@ -13,7 +13,7 @@
 // Plus aggressive defaults (only architectural kinds visible) and
 // `React.memo` on EntityNode so re-renders stay local.
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { ReactFlow, Background, Controls, MiniMap } from 'reactflow';
 import type { Node, Edge, NodeProps, NodeTypes } from 'reactflow';
 import { useReactFlow as useReactFlowNamed } from 'reactflow';
@@ -425,15 +425,19 @@ export default function CodeGraphCanvas() {
     return () => clearTimeout(t);
   }, [autoLayoutRequested, lastEntityCount, fitView]);
 
-  // Initial fitView when state is first populated.
-  const initialized = useRef(false);
+  // Fit the viewport whenever a freshly-loaded project becomes visible. The
+  // dependency on `state?.projectFingerprint` (not `nodes.length`) ensures
+  // fitView re-runs when the user re-opens an already-scanned project — a
+  // stale `initialized` ref used to swallow that and leave the viewport
+  // pointed at the previous project's coordinates.
   useEffect(() => {
-    if (initialized.current) return;
-    if (nodes.length === 0) return;
-    initialized.current = true;
+    if (!state || nodes.length === 0) return;
+    const fp = state.projectFingerprint;
+    if (!fp) return;
     const t = setTimeout(() => fitView({ duration: 300, padding: 0.15 }), 100);
+    logger.info('layout.fitview', { fingerprint: fp, nodes: nodes.length });
     return () => clearTimeout(t);
-  }, [nodes.length, fitView]);
+  }, [state?.projectFingerprint, nodes.length, fitView, state]);
 
   const onNodeClick = useCallback(
     (_e: React.MouseEvent, node: Node) => {

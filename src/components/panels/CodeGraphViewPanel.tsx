@@ -328,10 +328,11 @@ function ModelPicker({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
+        title={models.find((m) => m.id === value)?.id ?? value}
         className="flex-1 px-2 py-1.5 text-xs bg-slate-800/60 border border-slate-700/50 rounded text-white focus:outline-none focus:ring-1 focus:ring-emerald-500/50 disabled:opacity-50"
       >
         {models.map((m) => (
-          <option key={m.id} value={m.id}>{m.label} ({m.id})</option>
+          <option key={m.id} value={m.id}>{m.label}</option>
         ))}
       </select>
     </div>
