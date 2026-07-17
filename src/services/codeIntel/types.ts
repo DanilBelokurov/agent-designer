@@ -6,14 +6,20 @@
 export type EntityKind =
   | 'file'
   | 'module'
+  | 'package'
   | 'class'
   | 'interface'
   | 'object'
   | 'enum'
+  | 'companion'
   | 'function'
   | 'method'
+  | 'field'
+  | 'parameter'
   | 'variable'
+  | 'constant'
   | 'annotation'
+  | 'type'
   | 'unknown';
 
 export type RelationKind =
@@ -22,7 +28,12 @@ export type RelationKind =
   | 'implements'
   | 'calls'
   | 'annotated_by'
-  | 'imports';
+  | 'imports'
+  | 'returns'
+  | 'has_parameter'
+  | 'field_of'
+  | 'extension_of'
+  | 'references';
 
 export interface CodeEntity {
   id: string;
@@ -61,6 +72,15 @@ export type Archetype =
   | 'dto'
   | 'filter'
   | 'middleware'
+  | 'client'
+  | 'gateway'
+  | 'adapter'
+  | 'producer'
+  | 'consumer'
+  | 'validator'
+  | 'presenter'
+  | 'view'
+  | 'exception'
   | 'config'
   | 'test'
   | 'main'
@@ -71,6 +91,12 @@ export interface SemanticInfo {
   entityId: string;
   role: string;
   description: string;
+  /** Why the entity exists in the project — Qwen-derived purpose. */
+  purpose?: string;
+  /** Other entities that reference this one (incoming edges, textual summary). */
+  usedBy?: string;
+  /** Other entities this one depends on (outgoing edges, textual summary). */
+  dependsOn?: string;
   timestamp: number;
 }
 

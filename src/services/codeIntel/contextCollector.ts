@@ -17,7 +17,7 @@
 import type { AppNode } from '../../types';
 import type { AgentState, CodeEntity } from './types';
 import type { SemanticInfo } from './types';
-import { enrichEntities } from '../semanticEnricher';
+import { enrichEntitiesContext } from '../semanticEnricher';
 
 const DEFAULT_LIMIT = 10;       // how many snippets land in the prompt
 const RELEVANT_POOL_SIZE = 15;  // how many candidates to enrich
@@ -118,6 +118,15 @@ function renderEntityBlock(entity: CodeEntity, info: SemanticInfo): string[] {
   }
   lines.push(`- **Semantic role:** \`${info.role}\``);
   lines.push(`- **Summary:** ${info.description || '(no description)'}`);
+  if (info.purpose) {
+    lines.push(`- **Purpose:** ${info.purpose}`);
+  }
+  if (info.usedBy) {
+    lines.push(`- **Used by:** ${info.usedBy}`);
+  }
+  if (info.dependsOn) {
+    lines.push(`- **Depends on:** ${info.dependsOn}`);
+  }
 
   if (entity.modifiers && entity.modifiers.length) {
     lines.push(`- **Modifiers:** \`${entity.modifiers.join(' ')}\``);
@@ -173,7 +182,7 @@ export async function collectContextForNode(
           timestamp: 0,
         } satisfies SemanticInfo,
       }))
-    : await enrichEntities(entities, options.onProgress);
+    : await enrichEntitiesContext(entities, state, options.onProgress);
 
   // Re-rank: bump entities that survived enrichment with a recognised role
   // and have a non-empty description.

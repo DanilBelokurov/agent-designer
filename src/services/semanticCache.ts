@@ -29,12 +29,9 @@ import {
   type AgentState,
 } from './codeIntel/types';
 
-export interface SemanticInfo {
-  entityId: string;
-  role: string;
-  description: string;
-  timestamp: number;
-}
+// Re-exported from codeIntel/types so we have a single source of truth.
+export type { SemanticInfo } from './codeIntel/types';
+import type { SemanticInfo } from './codeIntel/types';
 
 const FLUSH_DEBOUNCE_MS = 400;
 

@@ -137,7 +137,7 @@ agent-graph-designer/
 │       ├── GraphCanvas.tsx             # top-level shell, держит React Flow + панели
 │       ├── Toolbar.tsx                 # top bar: project name, импорт/экспорт, codegen
 │       ├── InstructionGeneratorDialog.tsx # модалка генерации инструкции
-│       ├── CodeGraphToolbarButton.tsx  # floating панель сканирования кода
+│       ├── CodeGraphCanvas.tsx         # ReactFlow рендер entities+relations (layer-based layout)
 │       ├── nodes/
 │       │   ├── OrchestratorNode.tsx    # indigo, target top, source bottom
 │       │   ├── SubAgentNode.tsx        # blue, target top, source bottom
@@ -286,7 +286,7 @@ orchestrator → skill      → skill_attachment
 ### 8.3 Helpers
 
 `describeGraph(snapshot)` — `{ totalEntities, byKind, byLanguage }` — для UI-карточек статистики.
-`findMatchingEntities(graph, query)` — поиск сущностей по имени (для поиска в `CodeGraphToolbarButton`).
+`findMatchingEntities(state, query, options)` — поиск сущностей по имени (для поиска в `CodeGraphViewPanel`); поддерживает фильтры `kind` / `language` / `archetype`.
 
 ---
 
@@ -625,7 +625,7 @@ Show concrete examples of using this Skill.
 
 Универсальный экстрактор в `src/services/codeIntel/`. Без per-language WASM, без IDB. Состояние живёт в `.agent-graph/state.json` внутри выбранной папки проекта (атомарная запись tmp + rename).
 
-**Где:** `src/services/codeIntel/*`, `src/store/useCodeGraphStore.ts`, `src/components/CodeGraphToolbarButton.tsx`, `src/services/semanticEnricher.ts`.
+**Где:** `src/services/codeIntel/*`, `src/store/useCodeGraphStore.ts`, `src/components/CodeGraphCanvas.tsx`, `src/components/panels/CodeGraphViewPanel.tsx`, `src/services/semanticEnricher.ts`.
 
 #### 11.9.1 Архитектура слоёв
 
@@ -645,18 +645,29 @@ layer.ts            → analyzeProject(dir) — единая entry-point
 #### 11.9.2 Extractor (braceLanguage) — что вытаскивается
 
 - `function_declaration`, `generator_function_declaration`, `arrow_function` (внутри `variable_declarator`)
-- `class_declaration`, `interface_declaration`, `enum_declaration`, `object_declaration`
+- `class_declaration`, `interface_declaration`, `enum_declaration`, `object_declaration` (Kotlin `companion object` → kind `companion`)
 - `method_definition`, `constructor`
 - `import_statement` / `import_from_statement` (создаёт module entities + `imports` relation)
 - `export_statement` (рекурсия в inner)
 - `lexical_declaration` (recurse в `variable_declarator`)
+- Поля внутри контейнеров: `field` (Kotlin `val`/`var`, TS `let`/`const`/`var`), promoted в `constant` если есть modifier `const` (или `static`+`final` для Java)
 - Аннотации Kotlin/Java (`@Foo`, `@Bar(...)`) собираются в `entity.annotations`
 - Модификаторы (`public`, `private`, `final`, `static`, `suspend`, `override`, …) собираются в `entity.modifiers`
-- Каждый entity: `id`, `kind`, `name`, `signature`, `bodySnippet` (≤24 строк, ≤2.4 KB), `docComment`, `filePath`, `startLine`/`endLine`, `language`, `parentId`, `modifiers?`, `annotations?`.
+- Параметры методов/функций парсятся из скобок сигнатуры → `parameter` entities с `parentId` = method.id и relation `has_parameter`
+- Возвращаемый тип (после `)`) → relation `returns` к type entity (`type:<lang>:<Name>`)
+- Заголовок класса: Kotlin `: Base, Iface`, Java/TS `extends ... implements ...` → relations `inherits` / `implements`
+- Kotlin extension-функции (`fun Foo.bar()`) → relation `extension_of` к receiver-типу
+- Каждый entity: `id`, `kind`, `name`, `signature`, `bodySnippet` (≤24 строк, ≤2.4 KB), `docComment`, `filePath`, `startLine`/`endLine`, `language`, **`parentId`** (owning container), `modifiers?`, `annotations?`.
+- **Иерархия через `parentId`** — `walkScope` рекурсивно спускается в `{ ... }` контейнеров, все вложенные сущности получают правильный `parentId`. Без этого layer-based layout в `CodeGraphCanvas` не работает.
 
 #### 11.9.3 Extractor (indentLanguage — Python)
 
 - `function_definition`, `class_definition`, `import_statement`/`import_from_statement`, `decorated_definition`. Indent-balanced extraction для тела.
+- **Иерархия через `parentId`:** `walkScope` рекурсивно спускается в тело class по delta-indent, все nested defs/поля получают `parentId` = class.id.
+- Параметры парсятся из `(self, name: Type = default, *args, **kwargs)` → `parameter` entities, `self`/`cls` пропускаются
+- Return type после `->` → relation `returns`
+- Заголовок класса `class Foo(Base, Mixin):` → relations `inherits` (Kotlin-стиль через `:`)
+- Поля класса `name: Type = value` (с type annotation) → `field` entity с parentId = class.id
 
 #### 11.9.4 Folder scanner (`layer.ts → walk/readFileContent`)
 
@@ -690,14 +701,28 @@ layer.ts            → analyzeProject(dir) — единая entry-point
 - Авто-создаётся `.agent-graph/.gitignore` с содержимым `*\n!.gitignore\n`, чтобы state не утекал в коммиты без явного одобрения пользователя.
 - `AgentState` содержит: `entities`, `relations`, `archetypes`, `conventions`, `semantic`, `stats`, плюс meta (`version`, `projectFingerprint`, `rootPath`, `lastScannedAt`, `totalFilesScanned`).
 
-#### 11.9.8 UI: плавающая панель `CodeGraphToolbarButton`
+#### 11.9.8 UI: левая панель `NodePalette` (tabs) + `CodeGraphCanvas`
 
-1. Bottom-left, fixed, открывается по клику.
-2. Если `directory` не выбрана — кнопка Scan now сначала зовёт `pickProjectDirectory()`, потом сканирование.
-3. `beginScan`: status `scanning`, прогресс через `onProgress`, по завершении `replaceState(result.state)` → атомарная запись `state.json` + UI badge `cached`/`fresh` по `cacheHit`.
-4. **Search** по имени (top-8 совпадений из `findMatchingEntities`, с фильтрами kind/language/archetype).
-5. **Stats**: сетка с подсчётом per kind + per archetype.
-6. **Parser indicator**: `code-intel` pill + `cached`/`fresh` pill (заменили `tree-sitter`/`regex-fallback`).
+1. В `NodePalette` сверху добавлены tabs **Harness / Graph** (через `useUiStore.leftTab`). При выборе меняется содержимое панели и холст в `GraphCanvas`.
+2. **Harness tab**: старая drag-n-drop палитра (Orchestrator/Agent/Skill cards). Холст — `<HarnessCanvas>` с ReactFlow + drop-логикой + properties panel справа.
+3. **Graph tab**: `<CodeGraphViewPanel>` слева — scan controls, search, stats, parser/cache pills, **Filters** (kinds/relations/languages/archetypes — chip-toggleable, `useUiStore.graphFilters`). Холст — `<CodeGraphCanvas>`, который рендерит `state.entities` как ReactFlow-ноды и `state.relations` как рёбра. PropertiesPanel скрыт.
+4. **Compound nodes в `CodeGraphCanvas`**: для class/interface/enum/object/companion (CONTAINER_KINDS) — все вложенные methods/fields/parameters имеют `parentNode: container.id` + `extent: 'parent'`. Сам контейнер получает фиксированный размер через `style.width/height` и `border: none / background: transparent`. Дети внутри контейнера — компактные ноды (200×44) в сетке 2 колонки. Это даёт визуально читаемую иерархию: class снаружи, методы внутри.
+5. **Стили рёбер по RelationKind** (`RELATION_STYLE` в `CodeGraphCanvas.tsx`):
+   - `inherits` — сплошная фиолетовая, толстая (2px)
+   - `implements` — сплошная cyan, толстая (2px)
+   - `calls` — сплошная emerald, средняя (1.5px), **animated**
+   - `imports` — оранжевая dashed `'6 4'`
+   - `extension_of` — оранжевая dash-dot `'6 3 2 3'`
+   - `references` — серая dotted `'2 6'`
+   - `returns` / `has_parameter` / `field_of` — тонкая серая (1px, без dash)
+   - `contains` — пунктир `'2 4'` (скрыт по умолчанию через фильтры)
+   - `annotated_by` — розовая dashed `'4 4'`
+6. **Легенда** в bottom-left холста — показывает стили основных relation kinds с примерами линий (включая анимированные).
+7. **Filters** (`useUiStore.graphFilters: GraphFilters`) — Sets для kinds/relations/languages/archetypes. По умолчанию включено всё полезное, `contains` исключён. Применяется в `CodeGraphCanvas.applyFilters` до передачи в ReactFlow (entities и relations фильтруются независимо).
+8. Layout: containers (top-level) располагаются по `(filePath, startLine)` горизонтально в строке, файлы идут вертикально сверху вниз. Дети внутри контейнера — фиксированная сетка 2 колонки. `fitView({ duration: 300, padding: 0.15 })` вызывается на изменение `nodes.length`.
+9. `CodeGraphToolbarButton` (плавающая кнопка) удалён — всё его содержимое переехало в `CodeGraphViewPanel`.
+10. `analyzeProject` через `onProgress` → `setProgress`, по завершении `replaceState(result.state)` (атомарная запись `state.json`) + UI pill `cached`/`fresh` по `cacheHit`.
+11. `findMatchingEntities(state, query, { kind?, language?, archetype? })` используется в search-блоке `CodeGraphViewPanel`.
 
 #### 11.9.9 Context collector (`codeIntel/contextCollector.ts`)
 
@@ -732,9 +757,15 @@ layer.ts            → analyzeProject(dir) — единая entry-point
 
 ---
 
-### 11.10 Семантическое обогащение графа кода через Qwen
+### 11.10 Семантическое обогащение графа кода через Qwen (с контекстом связей)
 
-Поверх code-intel extractor'а лежит слой семантики: Qwen получает сигнатуру + тело каждой сущности, попавшей в контекст, и возвращает короткое описание роли (`controller`/`service`/`repository`/…) плюс one-line summary. Результат кешируется в `state.semantic` (внутри того же `state.json`) и подставляется в `## Project Code Context` под каждой сущностью, чтобы основной вызов `/generate` получал уже размеченную выжимку вместо сырых сигнатур.
+Двухуровневое обогащение:
+- **`enrichEntity(entity)`** — простой legacy-путь. Qwen видит только signature + body + docComment. Возвращает `{ role, description }`.
+- **`enrichEntityContext(entity, state)`** — основной путь. Qwen видит также входящие/исходящие relations сущности (кто её вызывает / наследует / на что она ссылается), и возвращает расширенный `SemanticInfo`: `role`, `description`, `purpose` (зачем сущность в проекте), `usedBy` (кто её использует), `dependsOn` (от чего она зависит). Кешируется в `state.semantic[id]` с проверкой, что entry содержит contextual-поля; старые записи без них пере-обогащаются.
+
+Контекст для промпта формируется в `collectRelationContext` (incoming + outgoing relations, имя вместо id, cap 12 каждой стороны).
+
+`enrichEntitiesContext` (sequential, используется `codeIntel/contextCollector.ts`) прогоняет `enrichEntityContext` для топ-N матчей ноды и записывает результат в Markdown-блок `## Project Code Context` вместе с **Purpose / Used by / Depends on** строками.
 
 #### Архитектура
 
@@ -774,7 +805,7 @@ layer.ts            → analyzeProject(dir) — единая entry-point
 | `src/services/codeIntel/contextCollector.ts` | (обновлено) — `collectContextForNode` теперь async, принимает `onProgress`. Делит candidate'ов на `enrichPoolSize` (default 15), просит обогащение, ре-ранкирует по признанной роли и рендерит Markdown с `**Archetype:**` + `**Semantic role:**` + `**Summary:**` + `**Modifiers:**` + `**Annotations:**` блоками. |
 | `src/services/instructionGenerator.ts` | `buildPromptForNode` стал async. Принимает `codeGraph` + `onEnrichmentProgress` в input. Если `codeGraph` пуст — context блок пропускается. Если передан `precomputedCodeContext` — используется verbatim (полезно для тестов). **Промпт перестроен так, чтобы Qwen использовал `## Project Code Context` как источник примеров**: context-блок перенесён сразу перед "Required Body Sections", добавлен блок `**PRIMARY ANCHOR:**` указывающий на entity чьё имя совпадает с `functionName` скила (или slug label), `## Examples` для skills помечен как REQUIRED и привязан синтаксисом к блоку context (`MUST use the EXACT symbols (function / class / method names, parameter names, return shapes) you saw in ## Project Code Context`). |
 | `src/components/InstructionGeneratorDialog.tsx` | Новый state `enrichment { current, total, entityName, phase }`. Кнопка показывает `Анализирую N/M · <entity>` во время enrichment и `Генерирую…` во время основного вызова. `handleClose` обёртка вокруг `onClose` — flush'ит кеш при Escape / X / backdrop / Cancel. Save-button тоже идёт через `handleClose`. |
-| `src/components/CodeGraphToolbarButton.tsx` | Clear-button сначала зовёт `semanticCache.flush()`, потом `semanticCache.clear()`, потом `reset()` — чтобы pending записи не потерялись. |
+| `src/components/CodeGraphToolbarButton.tsx` | **Удалён.** Содержимое переехало в `src/components/panels/CodeGraphViewPanel.tsx` (тело Graph-таб NodePalette). |
 | `src/components/GraphCanvas.tsx` | Подписан на `useFileSystemStore.directory`. На смену директории → `setDirectory(newDir)` + `loadFromDB()`. На `pagehide` / `beforeunload` → `flush()` (внутри `semanticCache.ts`). |
 
 #### Step-by-step
