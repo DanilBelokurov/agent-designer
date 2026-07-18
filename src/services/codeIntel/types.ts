@@ -56,6 +56,17 @@ export interface CodeEntity {
   semanticRole?: string;
   /** Qwen-derived short description. */
   semanticDescription?: string;
+  /**
+   * Brief Qwen-derived description of what this entity does and what it is
+   * used for, generated from body content (NOT from docstrings). Populated
+   * by `enrichDescriptions` during the scan pipeline; surfaces in the
+   * search index so the user can find a class by what it does, not just
+   * by name. Lives on the entity itself (rather than only in
+   * `state.semantic`) so it's available offline / without a cache lookup.
+   */
+  description?: string;
+  /** ISO timestamp of when `description` was generated. */
+  descriptionGeneratedAt?: string;
 }
 
 export interface CodeRelation {

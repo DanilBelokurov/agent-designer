@@ -8,6 +8,12 @@
 // clears the folder, the in-memory state is rehydrated from disk (or
 // wiped). Writes go through `replaceState`, which persists synchronously
 // after each scan completes.
+//
+// Layout positions are persisted to `.agent-graph/layout.json` (see
+// `codeIntel/layoutCache`) and rehydrated alongside state. The canvas
+// reads them directly instead of running dagre on every render — that's
+// the difference between "open the graph tab in 50ms" and "freeze the
+// browser for 3s while dagre recomputes 10k nodes".
 
 import { create } from 'zustand';
 import type { ProjectDirectory } from '../services/fileSystem';
@@ -22,12 +28,17 @@ import {
   loadAgentState,
   saveAgentState,
 } from '../services/codeIntel/stateIO';
+import {
+  clearLayout,
+  loadLayout,
+  type LayoutPosition,
+} from '../services/codeIntel/layoutCache';
 import { logger } from '../services/logger';
 
 export type ScanPhase = 'idle' | 'scanning' | 'done' | 'error' | 'cancelled';
 
 export interface ScanProgressSnapshot {
-  phase: 'reading' | 'extracting' | 'archetyping' | 'conventions' | 'saving' | 'done';
+  phase: 'reading' | 'extracting' | 'archetyping' | 'conventions' | 'enriching' | 'saving' | 'done';
   current: number;
   total: number;
   detail?: string;
@@ -49,11 +60,22 @@ interface CodeGraphUIState {
   parser: 'code-intel' | null;
   /** True if the last load/analyze reused a previously persisted AgentState. */
   cacheHit: boolean | null;
+  /**
+   * Cached dagre positions keyed by entity id. Loaded from
+   * `.agent-graph/layout.json` after every successful `setDirectory` /
+   * `replaceState`. `null` when the cache is missing or stale — the
+   * canvas then falls back to running dagre at render time (slow path).
+   */
+  layoutPositions: Map<string, LayoutPosition> | null;
+  /** ISO timestamp from the layout cache file. */
+  layoutComputedAt: string | null;
 
   setProgress: (p: ScanProgressSnapshot) => void;
   setPhase: (p: ScanPhase, error?: string | null) => void;
   setParser: (k: CodeGraphUIState['parser']) => void;
   setCacheHit: (v: boolean | null) => void;
+  /** Update the in-memory layout cache (e.g. after `computeAndCacheLayout`). */
+  setLayout: (positions: Map<string, LayoutPosition>, computedAt: string) => void;
 
   /** Replace the state and persist atomically to state.json. */
   replaceState: (next: AgentState) => Promise<void>;
@@ -75,86 +97,143 @@ const EMPTY_PROGRESS: ScanProgressSnapshot = {
   errors: 0,
 };
 
-export const useCodeGraphStore = create<CodeGraphUIState>((set) => ({
-  state: null,
-  phase: 'idle',
-  error: null,
-  progress: EMPTY_PROGRESS,
-  parser: null,
-  cacheHit: null,
-
-  setProgress: (p) => set({ progress: p }),
-  setPhase: (p, error = null) => set({ phase: p, error }),
-  setParser: (k) => set({ parser: k }),
-  setCacheHit: (v) => set({ cacheHit: v }),
-
-  replaceState: async (next) => {
-    set({ state: next });
-    const dir = currentDir();
-    if (dir) {
-      try {
-        await saveAgentState(dir, next);
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('[useCodeGraphStore] saveAgentState failed:', err);
-      }
-    }
-  },
-
-  reset: async () => {
-    set({
-      state: null,
-      phase: 'idle',
-      error: null,
-      progress: EMPTY_PROGRESS,
-      parser: null,
-      cacheHit: null,
-    });
-    const dir = currentDir();
-    if (dir) {
-      try {
-        await clearAgentState(dir);
-      } catch {
-        // ignore — directory may already be cleared
-      }
-    }
-  },
-
-  setDirectory: async (dir) => {
-    logger.info('directory.set', { name: dir?.name ?? null, handle: !!dir });
-    set({
-      state: null,
-      phase: 'idle',
-      error: null,
-      progress: EMPTY_PROGRESS,
-      parser: null,
-      cacheHit: null,
-    });
-    setCurrentDir(dir);
-    if (!dir) return;
+export const useCodeGraphStore = create<CodeGraphUIState>((set, get) => {
+  // Helper: load the layout cache for a directory and update state. The
+  // canvas reads `layoutPositions` directly, so this is the single
+  // source of truth for the cache.
+  async function rehydrateLayout(dir: ProjectDirectory, fingerprint: string) {
     try {
-      const loaded = await loadAgentState(dir);
-      if (loaded) {
-        logger.info('directory.stateLoaded', {
-          entities: loaded.entities.length,
-          relations: loaded.relations.length,
-          fingerprint: loaded.projectFingerprint,
-          rootPath: loaded.rootPath,
+      const cache = await loadLayout(dir, fingerprint);
+      if (cache) {
+        const map = new Map<string, LayoutPosition>();
+        for (const [id, pos] of Object.entries(cache.positions)) {
+          map.set(id, pos);
+        }
+        set({ layoutPositions: map, layoutComputedAt: cache.computedAt });
+        logger.info('layout.loaded', {
+          fingerprint,
+          positions: map.size,
+          computedAt: cache.computedAt,
         });
-        set({ state: loaded, cacheHit: true });
       } else {
-        logger.info('directory.noState', { name: dir.name });
-        set({ cacheHit: false });
+        set({ layoutPositions: null, layoutComputedAt: null });
       }
     } catch (err) {
-      logger.warn('directory.loadFailed', {
-        name: dir.name,
+      logger.warn('layout.loadFailed', {
         message: err instanceof Error ? err.message : String(err),
       });
-      set({ cacheHit: false });
+      set({ layoutPositions: null, layoutComputedAt: null });
     }
-  },
-}));
+  }
+
+  return {
+    state: null,
+    phase: 'idle',
+    error: null,
+    progress: EMPTY_PROGRESS,
+    parser: null,
+    cacheHit: null,
+    layoutPositions: null,
+    layoutComputedAt: null,
+
+    setProgress: (p) => set({ progress: p }),
+    setPhase: (p, error = null) => set({ phase: p, error }),
+    setParser: (k) => set({ parser: k }),
+    setCacheHit: (v) => set({ cacheHit: v }),
+
+    setLayout: (positions, computedAt) => {
+      set({ layoutPositions: positions, layoutComputedAt: computedAt });
+    },
+
+    replaceState: async (next) => {
+      const prev = get().state;
+      // If the fingerprint changed, the cached layout no longer matches
+      // the entity set — drop it. The caller (`analyzeProject`) will
+      // recompute and write a fresh cache before returning.
+      if (prev && prev.projectFingerprint !== next.projectFingerprint) {
+        set({ layoutPositions: null, layoutComputedAt: null });
+      }
+      set({ state: next });
+      const dir = currentDir();
+      if (dir) {
+        try {
+          await saveAgentState(dir, next);
+          // Re-read layout.json in case the caller just wrote it (the
+          // standard scan path: saveAgentState → computeAndCacheLayout →
+          // replaceState).
+          await rehydrateLayout(dir, next.projectFingerprint);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('[useCodeGraphStore] saveAgentState failed:', err);
+        }
+      }
+    },
+
+    reset: async () => {
+      set({
+        state: null,
+        phase: 'idle',
+        error: null,
+        progress: EMPTY_PROGRESS,
+        parser: null,
+        cacheHit: null,
+        layoutPositions: null,
+        layoutComputedAt: null,
+      });
+      const dir = currentDir();
+      if (dir) {
+        try {
+          await clearAgentState(dir);
+        } catch {
+          // ignore — directory may already be cleared
+        }
+        try {
+          await clearLayout(dir);
+        } catch {
+          // ignore
+        }
+      }
+    },
+
+    setDirectory: async (dir) => {
+      logger.info('directory.set', { name: dir?.name ?? null, handle: !!dir });
+      set({
+        state: null,
+        phase: 'idle',
+        error: null,
+        progress: EMPTY_PROGRESS,
+        parser: null,
+        cacheHit: null,
+        layoutPositions: null,
+        layoutComputedAt: null,
+      });
+      setCurrentDir(dir);
+      if (!dir) return;
+      try {
+        const loaded = await loadAgentState(dir);
+        if (loaded) {
+          logger.info('directory.stateLoaded', {
+            entities: loaded.entities.length,
+            relations: loaded.relations.length,
+            fingerprint: loaded.projectFingerprint,
+            rootPath: loaded.rootPath,
+          });
+          set({ state: loaded, cacheHit: true });
+          await rehydrateLayout(dir, loaded.projectFingerprint);
+        } else {
+          logger.info('directory.noState', { name: dir.name });
+          set({ cacheHit: false });
+        }
+      } catch (err) {
+        logger.warn('directory.loadFailed', {
+          name: dir.name,
+          message: err instanceof Error ? err.message : String(err),
+        });
+        set({ cacheHit: false });
+      }
+    },
+  };
+});
 
 // --- directory binding (module-scoped) -------------------------------------
 //

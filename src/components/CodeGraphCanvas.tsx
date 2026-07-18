@@ -17,25 +17,23 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { ReactFlow, Background, Controls, MiniMap } from 'reactflow';
 import type { Node, Edge, NodeProps, NodeTypes } from 'reactflow';
 import { useReactFlow as useReactFlowNamed } from 'reactflow';
-import * as dagre from 'dagre';
 import {
   Box, Braces, ChevronDown, ChevronUp, Cog, Cpu, FunctionSquare, GitBranch, Hash, Layers, Maximize2, Minimize2, Package, Tag, Type, Variable,
 } from 'lucide-react';
 import { useCodeGraphStore } from '../store/useCodeGraphStore';
 import type { CodeEntity, CodeRelation, EntityKind, RelationKind } from '../services/codeIntel/types';
+import type { LayoutPosition } from '../services/codeIntel/layoutCache';
+import { computeLayoutPositions } from '../services/codeIntel/layoutEngine';
+import { computeAndCacheLayout } from '../services/codeIntel/layer';
 import { useUiStore } from '../store/useUiStore';
+import { useFileSystemStore } from '../store/useFileSystemStore';
 import { logger } from '../services/logger';
 
 // ─── Constants ──────────────────────────────────────────────────────────
 
-const STANDALONE_W = 220;
-const STANDALONE_H = 64;
 const COMPOUND_W = 280;
 const COMPOUND_H = 88;
 const CHILD_H = 44;
-const DAGRE_NODE_SEP = 60;
-const DAGRE_EDGE_SEP = 20;
-const DAGRE_RANK_SEP = 90;
 
 const CONTAINER_KINDS: ReadonlySet<EntityKind> = new Set([
   'class', 'interface', 'enum', 'object', 'companion',
@@ -164,93 +162,14 @@ const EntityNode = memo(EntityNodeImpl, (prev, next) => (
 const nodeTypes: NodeTypes = { entity: EntityNode };
 
 // ─── Layout (dagre) ────────────────────────────────────────────────────
-
-interface LayoutResult {
-  positions: Map<string, { x: number; y: number }>;
-}
-
-function layoutWithDagre(
-  entities: CodeEntity[],
-  relations: CodeRelation[],
-  options: {
-    /** Skip laying out nodes that belong to collapsed parents — they
-     *  won't be in `nodes` anyway, so dagre doesn't need their position. */
-    isCollapsedParent?: (id: string) => boolean;
-    /** Set of entity ids that will actually become flow nodes. Used to
-     *  skip `setParent` for parents that aren't rendered (e.g. file
-     *  entities) so dagre doesn't error out. */
-    renderedIds?: ReadonlySet<string>;
-  } = {},
-): LayoutResult {
-  const g = new dagre.graphlib.Graph({ multigraph: true, compound: true });
-  g.setGraph({
-    rankdir: 'TB',
-    nodesep: DAGRE_NODE_SEP,
-    edgesep: DAGRE_EDGE_SEP,
-    ranksep: DAGRE_RANK_SEP,
-    marginx: 40,
-    marginy: 40,
-  });
-  g.setDefaultEdgeLabel(() => ({}));
-
-  const positions = new Map<string, { x: number; y: number }>();
-  const entityById = new Map<string, CodeEntity>();
-  for (const e of entities) entityById.set(e.id, e);
-
-  // Add nodes — only those that will be rendered (skip children of collapsed
-  // compounds since they're omitted from the ReactFlow nodes array).
-  const visited = new Set<string>();
-  function addNode(id: string) {
-    if (visited.has(id)) return;
-    visited.add(id);
-    const e = entityById.get(id);
-    if (!e) return;
-    const isContainer = CONTAINER_KINDS.has(e.kind);
-    g.setNode(id, {
-      width: isContainer ? COMPOUND_W : STANDALONE_W,
-      height: isContainer ? COMPOUND_H : STANDALONE_H,
-    });
-    if (e.parentId) {
-      const parentWillRender = options.renderedIds
-        ? options.renderedIds.has(e.parentId)
-        : entityById.has(e.parentId);
-      const parentNotCollapsed = !options.isCollapsedParent?.(e.parentId);
-      if (parentWillRender && parentNotCollapsed) {
-        try { g.setParent(id, e.parentId); } catch { /* ignore */ }
-      }
-    }
-  }
-  for (const e of entities) addNode(e.id);
-
-  // Add edges. Multi-edge (multiple relations between same pair) supported.
-  for (const r of relations) {
-    if (!visited.has(r.from) || !visited.has(r.to)) continue;
-    if (r.from === r.to) continue;
-    try {
-      g.setEdge(r.from, r.to, { className: r.kind }, r.kind);
-    } catch { /* skip invalid edges */ }
-  }
-
-  try {
-    dagre.layout(g);
-  } catch (err) {
-    logger.warn('layout.dagre.failed', { message: err instanceof Error ? err.message : String(err) });
-  }
-
-  for (const id of visited) {
-    const n = g.node(id);
-    if (!n) continue;
-    // Dagre returns positions as (x, y) of the node centre. Subtract
-    // half the node dimensions to get the top-left corner that
-    // ReactFlow's `position` expects.
-    positions.set(id, {
-      x: n.x - (n.width ?? STANDALONE_W) / 2,
-      y: n.y - (n.height ?? STANDALONE_H) / 2,
-    });
-  }
-
-  return { positions };
-}
+//
+// Layout positions come from `codeIntel/layoutEngine.computeLayoutPositions`
+// — both the cached path (`layoutPositions` from `.agent-graph/layout.json`)
+// and the fallback path use the same engine so coordinates stay consistent
+// with what scan wrote to disk. The engine stores top-level entities at
+// world coordinates and compound children at coordinates *relative* to
+// their parent, matching ReactFlow's `parentNode + extent:'parent'`
+// expectations.
 
 // ─── Filtering ──────────────────────────────────────────────────────────
 
@@ -312,6 +231,8 @@ function selectVisibleEntities(
 
 export default function CodeGraphCanvas() {
   const state = useCodeGraphStore((s) => s.state);
+  const layoutPositions = useCodeGraphStore((s) => s.layoutPositions);
+  const setLayout = useCodeGraphStore((s) => s.setLayout);
   const filters = useUiStore((s) => s.graphFilters);
   const collapsedSet = useUiStore((s) => s.compoundsCollapsed);
   const toggleCompoundCollapse = useUiStore((s) => s.toggleCompoundCollapse);
@@ -319,6 +240,7 @@ export default function CodeGraphCanvas() {
   const collapseAllCompounds = useUiStore((s) => s.collapseAllCompounds);
   const requestAutoLayout = useUiStore((s) => s.requestAutoLayout);
   const autoLayoutRequested = useUiStore((s) => s.autoLayoutRequested);
+  const directory = useFileSystemStore((s) => s.directory);
   const { fitView } = useReactFlowNamed();
 
   // Build entity id list of compound parents (for Collapse all button).
@@ -352,11 +274,20 @@ export default function CodeGraphCanvas() {
       if (e.kind !== 'file' && e.kind !== 'unknown') renderedIds.add(e.id);
     }
 
-    const isCollapsed = (id: string) => collapsedSet.has(id);
-    const { positions } = layoutWithDagre(visible, visibleRelations, {
-      isCollapsedParent: isCollapsed,
-      renderedIds,
-    });
+    let positions: Map<string, LayoutPosition>;
+    if (layoutPositions && layoutPositions.size > 0) {
+      // Fast path: positions are pre-computed by `analyzeProject` and
+      // persisted to `.agent-graph/layout.json`. Filters / collapse only
+      // hide nodes; topology doesn't change, so cached positions stay
+      // valid for whatever subset is currently visible.
+      positions = layoutPositions;
+    } else {
+      // Fallback: no cached layout (first scan in progress, cache deleted,
+      // fingerprint mismatch). Run the same engine `analyzeProject` uses,
+      // on the currently visible subset — this is the slow path the cache
+      // exists to avoid.
+      positions = computeLayoutPositions(visible, visibleRelations);
+    }
     const t3 = performance.now();
 
     // Compute visible-child-count per container for the badge.
@@ -435,17 +366,47 @@ export default function CodeGraphCanvas() {
     }
 
     return { nodes: flowNodes, edges: flowEdges, lastEntityCount: visible.length };
-  }, [state, filters, collapsedSet]);
+  }, [state, filters, collapsedSet, layoutPositions]);
 
-  // Handle explicit auto-layout request — re-fit the viewport.
+  // Handle explicit auto-layout request — re-run dagre, persist to
+  // `.agent-graph/layout.json`, and re-fit the viewport. With the cache
+  // in place this is no longer the only way to layout — opening a fresh
+  // scan already gives you pre-computed positions — but it's still the
+  // escape hatch for "I want to re-shuffle this".
   useEffect(() => {
     if (autoLayoutRequested === 0 || lastEntityCount === 0) return;
-    logger.info('layout.autolayout', { entities: lastEntityCount });
-    const t = setTimeout(() => {
-      fitView({ duration: 400, padding: 0.15 });
-    }, 50);
-    return () => clearTimeout(t);
-  }, [autoLayoutRequested, lastEntityCount, fitView]);
+    if (!state || !directory) {
+      // No project bound — nothing to lay out. fitView alone still helps
+      // for an empty canvas.
+      const t = setTimeout(() => fitView({ duration: 400, padding: 0.15 }), 50);
+      return () => clearTimeout(t);
+    }
+    logger.info('layout.autolayout.start', { entities: lastEntityCount });
+    let cancelled = false;
+    (async () => {
+      try {
+        const cache = await computeAndCacheLayout(
+          directory,
+          state.entities,
+          state.relations,
+          state.projectFingerprint,
+        );
+        if (cancelled) return;
+        const map = new Map<string, LayoutPosition>();
+        for (const [id, pos] of Object.entries(cache.positions)) map.set(id, pos);
+        setLayout(map, cache.computedAt);
+        const t = setTimeout(() => fitView({ duration: 400, padding: 0.15 }), 50);
+        return () => clearTimeout(t);
+      } catch (err) {
+        logger.warn('layout.autolayout.failed', {
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [autoLayoutRequested, lastEntityCount, fitView, state, directory, setLayout]);
 
   // Fit the viewport whenever a freshly-loaded project becomes visible. The
   // dependency on `state?.projectFingerprint` (not `nodes.length`) ensures

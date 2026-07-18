@@ -10,7 +10,12 @@
 
 import { generateViaQwen, QwenUnavailableError } from './qwenClient';
 import { semanticCache, type SemanticInfo } from './semanticCache';
-import type { AgentState, CodeEntity, CodeRelation } from './codeIntel/types';
+import type {
+  AgentState,
+  CodeEntity,
+  CodeRelation,
+  EntityKind,
+} from './codeIntel/types';
 
 const BODY_MAX = 2000;
 const DESCRIPTION_MAX = 100;
@@ -86,8 +91,7 @@ function renderRelationContext(ctx: RelationContext, state: AgentState): string 
 }
 
 function buildEnrichmentPrompt(entity: CodeEntity): string {
-  const body = entity.bodySnippet ? clip(entity.bodySnippet, BODY_MAX) : '(no body)';
-  const docBlock = entity.docComment ? `Документация:\n${entity.docComment}\n` : '';
+  const body = entity.bodySnippet ? clip(entity.bodySnippet, BODY_MAX) : '(нет тела)';
   return [
     'Ты — эксперт по анализу кода. Определи семантическую роль и дай краткое описание для следующей сущности.',
     '',
@@ -98,7 +102,8 @@ function buildEnrichmentPrompt(entity: CodeEntity): string {
     '```',
     body,
     '```',
-    docBlock,
+    '',
+    'ВАЖНО: описание должно отражать ЧТО ДЕЛАЕТ сущность по её коду, а не содержимое docstring/pydoc/java-doc комментариев. Игнорируй любые doc-комментарии в теле.',
     '',
     'Ответь строго в формате:',
     'РОЛЬ: <одно слово из списка: controller, service, repository, factory, adapter, configuration, entity, dto, mapper, handler, validator, utility, middleware, guard, filter, resolver, provider, helper, composable, hook, unknown>',
@@ -110,7 +115,6 @@ function buildEnrichmentPrompt(entity: CodeEntity): string {
 
 function buildContextualPrompt(entity: CodeEntity, state: AgentState, ctx: RelationContext): string {
   const body = entity.bodySnippet ? clip(entity.bodySnippet, BODY_MAX) : '(нет тела)';
-  const docBlock = entity.docComment ? `Документация:\n${entity.docComment}\n` : '';
   const relationBlock = renderRelationContext(ctx, state);
 
   return [
@@ -125,7 +129,8 @@ function buildContextualPrompt(entity: CodeEntity, state: AgentState, ctx: Relat
     '```',
     body,
     '```',
-    docBlock,
+    '',
+    'ВАЖНО: описание должно отражать ЧТО ДЕЛАЕТ сущность по её коду, а не содержимое docstring/pydoc/java-doc комментариев. Игнорируй любые doc-комментарии в теле.',
     '',
     '## Связи в графе кода',
     relationBlock,
@@ -227,7 +232,9 @@ export async function enrichEntityContext(
   const cached = await semanticCache.get(entity.id);
   // We only reuse the cache if it already has the contextual fields —
   // older cache entries from `enrichEntity` lack purpose/usedBy/dependsOn.
-  if (cached && (cached.purpose || cached.usedBy || cached.dependsOn)) {
+  // `description` is also checked because pre-description scan runs may
+  // have populated role-only entries that we want to refresh.
+  if (cached && (cached.purpose || cached.usedBy || cached.dependsOn || cached.description)) {
     return cached;
   }
 
@@ -279,6 +286,97 @@ export async function enrichEntitiesContext(
     onProgress?.(i + 1, entities.length, e.name, info);
   }
   return out;
+}
+
+/**
+ * Entity kinds we generate Qwen descriptions for during the scan
+ * pipeline. Containers are the search target ("which class does X"),
+ * top-level functions surface standalone utilities.
+ *
+ * Explicitly excluded: methods/fields/parameters/variables/constants —
+ * there are too many of them and they don't help find a class. Methods
+ * inherit the description of their containing class anyway.
+ */
+const DESCRIPTION_KINDS: ReadonlySet<EntityKind> = new Set([
+  'class', 'interface', 'object', 'enum', 'companion', 'function',
+]);
+
+/**
+ * Pick the entities we want descriptions for: containers + top-level
+ * functions. "Top-level" = function whose parent is a file (or no
+ * parent). Member functions of a class are skipped — the class
+ * description should cover them.
+ */
+export function pickDescribableEntities(entities: CodeEntity[]): CodeEntity[] {
+  return entities.filter((e) => {
+    if (!DESCRIPTION_KINDS.has(e.kind)) return false;
+    if (e.kind === 'function') {
+      // Only top-level functions. Member functions have parentId pointing
+      // at a container; skip those.
+      if (e.parentId) return false;
+    }
+    return true;
+  });
+}
+
+/** Default concurrency for `enrichDescriptions`. */
+const DEFAULT_DESCRIPTION_CONCURRENCY = 4;
+
+/**
+ * Bounded-concurrency enrichment that generates `description` for every
+ * container and top-level function in `state`. Designed for the scan
+ * pipeline where the cost of Qwen calls would otherwise dominate the
+ * scan time.
+ *
+ * - Filters down via `pickDescribableEntities` (containers + top-level
+ *   functions only).
+ * - Runs at most `concurrency` Qwen calls in parallel (default 4).
+ * - Reuses the in-memory semantic cache (entities that already have a
+ *   fresh-enough `SemanticInfo` are skipped).
+ * - Reports progress via `onProgress(current, total, entityName)`.
+ * - Honours `abort` so the caller can cancel the scan.
+ */
+export async function enrichDescriptions(
+  state: AgentState,
+  options: {
+    concurrency?: number;
+    model?: string;
+    onProgress?: (current: number, total: number, entityName: string) => void;
+    abort?: AbortSignal;
+  } = {},
+): Promise<SemanticInfo[]> {
+  const targets = pickDescribableEntities(state.entities);
+  const total = targets.length;
+  if (total === 0) return [];
+
+  const concurrency = Math.max(1, options.concurrency ?? DEFAULT_DESCRIPTION_CONCURRENCY);
+
+  let nextIndex = 0;
+  let doneCount = 0;
+  const results: SemanticInfo[] = [];
+
+  async function worker(): Promise<void> {
+    while (true) {
+      if (options.abort?.aborted) return;
+      const i = nextIndex++;
+      if (i >= total) return;
+      const entity = targets[i];
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const info = await enrichEntityContext(entity, state, { model: options.model });
+        results.push(info);
+      } catch {
+        // Already handled inside enrichEntityContext (cache fallback).
+      }
+      doneCount += 1;
+      options.onProgress?.(doneCount, total, entity.name);
+    }
+  }
+
+  const workers: Array<Promise<void>> = [];
+  for (let w = 0; w < concurrency; w++) workers.push(worker());
+  await Promise.all(workers);
+  return results;
 }
 
 /** Sequential enrichment (legacy path — no relation context). */

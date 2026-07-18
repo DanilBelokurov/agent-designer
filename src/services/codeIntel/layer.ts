@@ -9,6 +9,7 @@ import type {
   CodeEntity,
   CodeRelation,
   ProjectArchetypeIndex,
+  SemanticInfo,
 } from './types';
 import { languageForExtension } from './types';
 import { extractBraceLanguage } from './extractors/braceLanguage';
@@ -17,10 +18,18 @@ import { staticArchetypeForFile } from './architecture';
 import { groupFilesByPackage, learnArchetypes, MANIFEST_NAMES, projectFingerprintFor } from './archetypeLearner';
 import { detectConventions, type ConventionsInput } from './conventions';
 import { loadAgentState, saveAgentState } from './stateIO';
+import { computeLayoutPositionsAsRecord } from './layoutEngine';
+import {
+  saveLayout,
+  LAYOUT_CACHE_VERSION,
+  type LayoutCache,
+} from './layoutCache';
+import { semanticCache } from '../semanticCache';
+import { enrichDescriptions } from '../semanticEnricher';
 import { logger } from '../logger';
 
 export interface AnalyzeProgress {
-  phase: 'reading' | 'extracting' | 'archetyping' | 'conventions' | 'saving' | 'done';
+  phase: 'reading' | 'extracting' | 'archetyping' | 'conventions' | 'enriching' | 'saving' | 'done';
   current: number;
   total: number;
   detail?: string;
@@ -31,6 +40,10 @@ export interface AnalyzeOptions {
   relearnArchetypes?: boolean;
   skipArchetypes?: boolean;
   skipConventions?: boolean;
+  /** Skip Qwen-based description generation. Useful for fast rescans. */
+  skipDescriptions?: boolean;
+  /** Parallel Qwen calls during description generation (default 4). */
+  descriptionConcurrency?: number;
   /** Qwen model id to use for archetype learning. */
   model?: string;
   onProgress?: (p: AnalyzeProgress) => void;
@@ -274,10 +287,85 @@ export async function analyzeProject(
   // Apply archetypes to entities, gather counts
   const withArchetypes = applyArchetypes(entities, archetypes);
 
+  // Description enrichment — runs Qwen over every container and top-level
+  // function so each gets a brief "what this does / what it's for" line
+  // based on its body. Method/field/parameter/variable descriptions are
+  // intentionally skipped (too granular, don't help find a class).
+  let enrichedEntities: CodeEntity[] = withArchetypes.entities;
+  let newSemantic: Record<string, SemanticInfo> = { ...(existing?.semantic ?? {}) };
+  if (!options.skipDescriptions) {
+    // Make sure the semantic cache is bound to this directory — otherwise
+    // its debounced flush is a no-op and the description we generate here
+    // would never reach state.json on subsequent loads.
+    semanticCache.setDirectory(dir);
+    await semanticCache.loadFromDB();
+    const baseState: AgentState = existing ?? {
+      version: 1,
+      projectFingerprint: fp,
+      rootPath: dir.name,
+      lastScannedAt: '',
+      totalFilesScanned: stats.scanned,
+      entities: withArchetypes.entities,
+      relations,
+      archetypes,
+      conventions: conventions ?? {},
+      semantic: {},
+      stats: { totalEntities: 0, byKind: {} as AgentState['stats']['byKind'], byLanguage: {}, archetypeCounts: {} },
+    };
+    const partialState: AgentState = {
+      ...baseState,
+      entities: withArchetypes.entities,
+      relations,
+      projectFingerprint: fp,
+    };
+    onProgress?.({ phase: 'enriching', current: 0, total: 1, detail: 'qwen → descriptions' });
+    const infos = await enrichDescriptions(partialState, {
+      concurrency: options.descriptionConcurrency,
+      model: options.model,
+      abort: options.abort,
+      onProgress: (current, total, name) => {
+        onProgress?.({ phase: 'enriching', current, total, detail: name });
+      },
+    });
+    const now = new Date().toISOString();
+    const byEntityId = new Map<string, SemanticInfo>();
+    for (const info of infos) byEntityId.set(info.entityId, info);
+    enrichedEntities = withArchetypes.entities.map((e) => {
+      const info = byEntityId.get(e.id);
+      if (!info) return e;
+      newSemantic[info.entityId] = info;
+      return {
+        ...e,
+        description: info.description,
+        descriptionGeneratedAt: now,
+        semanticRole: info.role,
+        semanticDescription: info.description,
+      };
+    });
+    // Flush the semantic cache immediately so descriptions survive a
+    // mid-scan crash. Without this, the debounced flush races with
+    // saveAgentState below and may overwrite our new semantic map.
+    try {
+      await semanticCache.flush();
+      // Re-read after flush so we have the up-to-date snapshot.
+      const rehydrated = new Map<string, SemanticInfo>();
+      for (const id of byEntityId.keys()) {
+        const v = semanticCache.getSync(id);
+        if (v) rehydrated.set(id, v);
+      }
+      newSemantic = { ...newSemantic, ...Object.fromEntries(rehydrated) };
+    } catch (err) {
+      logger.warn('analyze.semanticFlushFailed', {
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+    logger.info('analyze.descriptions', { generated: byEntityId.size, total: withArchetypes.entities.length });
+  }
+
   // Compute stats
   const byKind: Record<string, number> = {};
   const byLanguage: Record<string, number> = {};
-  for (const e of withArchetypes.entities) {
+  for (const e of enrichedEntities) {
     byKind[e.kind] = (byKind[e.kind] ?? 0) + 1;
     if (e.language) byLanguage[e.language] = (byLanguage[e.language] ?? 0) + 1;
   }
@@ -292,13 +380,13 @@ export async function analyzeProject(
     rootPath: dir.name,
     lastScannedAt: new Date().toISOString(),
     totalFilesScanned: stats.scanned,
-    entities: withArchetypes.entities,
+    entities: enrichedEntities,
     relations,
     archetypes,
     conventions: conventions ?? existing?.conventions ?? {},
-    semantic: existing?.semantic ?? {},
+    semantic: newSemantic,
     stats: {
-      totalEntities: entities.length,
+      totalEntities: enrichedEntities.length,
       byKind: byKind as AgentState['stats']['byKind'],
       byLanguage,
       archetypeCounts,
@@ -310,13 +398,55 @@ export async function analyzeProject(
   logger.info('analyze.done', {
     entities: state.entities.length,
     relations: state.relations.length,
+    descriptions: state.entities.filter((e) => e.description).length,
     scanned: stats.scanned,
     matched: stats.matched,
     errors: stats.errors,
   });
   onProgress?.({ phase: 'done', current: 1, total: 1 });
 
+  // Compute dagre layout as part of the scan pipeline so the canvas can
+  // open instantly next time — it just reads the cached positions from
+  // `.agent-graph/layout.json` instead of running dagre on every render.
+  // On cacheHit we still re-run: cheap and keeps the cache consistent
+  // with any schema migration / entity edits.
+  try {
+    await computeAndCacheLayout(dir, state.entities, state.relations, state.projectFingerprint);
+  } catch (err) {
+    logger.warn('analyze.layoutCacheFailed', {
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   return { state, usedFallback: false, cacheHit };
+}
+
+/**
+ * Compute dagre positions for the full graph (no filters, all compounds
+ * expanded) and persist them to `.agent-graph/layout.json`. Idempotent —
+ * safe to call on every scan and on demand from the "Auto layout" button.
+ */
+export async function computeAndCacheLayout(
+  dir: ProjectDirectory,
+  entities: CodeEntity[],
+  relations: CodeRelation[],
+  projectFingerprint: string,
+): Promise<LayoutCache> {
+  const t0 = performance.now();
+  const positions = computeLayoutPositionsAsRecord(entities, relations);
+  const cache: LayoutCache = {
+    version: LAYOUT_CACHE_VERSION,
+    projectFingerprint,
+    computedAt: new Date().toISOString(),
+    positions,
+  };
+  await saveLayout(dir, cache);
+  logger.info('layout.cached', {
+    entities: entities.length,
+    positions: Object.keys(positions).length,
+    ms: Math.round(performance.now() - t0),
+  });
+  return cache;
 }
 
 /**
@@ -345,3 +475,11 @@ export type {
 } from './types';
 export { statePath, gitignorePath, loadAgentState, saveAgentState, clearAgentState } from './stateIO';
 export type { SearchHit, SearchQuery } from './searchIndex';
+export {
+  loadLayout,
+  saveLayout,
+  clearLayout,
+  LAYOUT_FILE_NAME,
+  LAYOUT_CACHE_VERSION,
+} from './layoutCache';
+export type { LayoutCache, LayoutPosition } from './layoutCache';

@@ -111,7 +111,7 @@ agent-graph-designer/
 │   ├── store/
 │   │   ├── useGraphStore.ts            # nodes / edges / selection / projectName
 │   │   ├── useFileSystemStore.ts       # picked project directory + lastError
-│   │   └── useCodeGraphStore.ts        # AgentState (entities/relations/archetypes/conventions/semantic), scan progress, persist в .agent-graph/state.json
+│   │   └── useCodeGraphStore.ts        # AgentState (entities/relations/archetypes/conventions/semantic) + layoutPositions cache, scan progress, persist в .agent-graph/state.json + .agent-graph/layout.json
 │   ├── services/
 │   │   ├── qwenClient.ts               # fetch wrapper /generate (relative URL)
 │   │   ├── fileSystem.ts               # FS Access API + browser-download fallback
@@ -123,6 +123,8 @@ agent-graph-designer/
 │   │       ├── tokenize.ts             # лексер (без WASM)
 │   │       ├── types.ts                # CodeEntity/CodeRelation/AgentState/Archetype/Languages
 │   │       ├── stateIO.ts              # load/save/clear .agent-graph/state.json (atomic)
+│   │       ├── layoutEngine.ts         # dagre-based positions for full graph (compound-aware)
+│   │       └── layoutCache.ts          # load/save/clear .agent-graph/layout.json (atomic, fingerprint-keyed)
 │   │       ├── archetypeLearner.ts     # Qwen-based per-package archetype learning + cache
 │   │       ├── architecture.ts         # статические regex-фолбэки для archetype
 │   │       ├── conventions.ts          # convention sniffer (indent/naming/imports/frameworks)
@@ -252,12 +254,26 @@ orchestrator → skill      → skill_attachment
   progress: { phase, current, total, detail?, scanned, matched, errors, currentFile? },
   parser: 'code-intel' | null,  // всегда code-intel (ранее было tree-sitter|regex-fallback|mixed)
   cacheHit: boolean | null,     // true если load/analyze использовал persisted AgentState
+  layoutPositions: Map<entityId, {x,y}> | null,  // dagre positions из .agent-graph/layout.json
+  layoutComputedAt: string | null,                // ISO timestamp layout cache
   setProgress, setPhase, setParser, setCacheHit,
-  replaceState(next),            // сохраняет в .agent-graph/state.json атомарно
-  reset(),                       // очищает state.json на диске
-  setDirectory(dir | null)       // биндит к проекту и читает state.json при смене папки
+  setLayout(positions, computedAt),  // обновляет in-memory кеш layout (из CodeGraphCanvas после Auto layout)
+  replaceState(next),            // сохраняет в .agent-graph/state.json атомарно, потом перечитывает layout.json
+  reset(),                       // очищает state.json + layout.json на диске
+  setDirectory(dir | null)       // биндит к проекту и читает state.json + layout.json при смене папки
 }
 ```
+
+### 8.0.1 Layout cache (`.agent-graph/layout.json`)
+
+Dagre-раскладка пересчитывалась на каждый рендер `CodeGraphCanvas` через `useMemo` — на больших проектах (5–15k entities) это занимало секунды и блокировало UI при открытии вкладки графа. Теперь layout считается один раз во время scan pipeline и персистится в `.agent-graph/layout.json` (отдельный файл рядом с `state.json`, тоже атомарно через tmp+rename).
+
+- **`computeAndCacheLayout(dir, entities, relations, fingerprint)`** в `codeIntel/layer.ts` — вычисляет dagre для полного графа (все ноды, все compounds expanded) и пишет в layout.json. Вызывается из `analyzeProject` после `saveAgentState` (await, не fire-and-forget — пользователь подождёт scan чуть дольше, зато канвас откроется мгновенно) и из `CodeGraphCanvas` по кнопке «Auto layout».
+- **Dagre работает без compound mode.** `computeLayoutPositions` в `codeIntel/layoutEngine.ts` использует `new dagre.graphlib.Graph({ multigraph: true })` (без `compound: true`) и не вызывает `g.setParent`. Все ноды — top-level, рёбра `contains` удерживают контейнеры и их членов рядом. После `dagre.layout` второй проход конвертирует координаты compound-детей в *локальные* относительно их parent (вычитая parent-координаты). Это совпадает с тем, что ожидает ReactFlow `parentNode + extent:'parent'`. Без этой конвертации compound-дети накладываются друг на друга (dagre отдаёт абсолютные координаты, ReactFlow читает их как локальные).
+- **`loadLayout(dir, fingerprint)`** в `codeIntel/layoutCache.ts` — читает кеш. Возвращает `null`, если файл отсутствует, повреждён или `projectFingerprint` не совпадает.
+- **`layoutPositions` в сторе** — `Map<entityId, {x,y}>` для быстрого чтения в `useMemo`. `setDirectory` и `replaceState` обновляют его через хелпер `rehydrateLayout`.
+- **`CodeGraphCanvas`** использует `layoutPositions` напрямую (быстрый путь). Если кеш отсутствует (первый scan не завершил layout cache, или fingerprint сменился) — fallback на runtime dagre.
+- **Инвалидация**: `projectFingerprint` в layout.json. При смене fingerprint в `replaceState` стор обнуляет `layoutPositions` — кеш станет невалидным, и `analyzeProject` перезапишет его новыми positions.
 
 ### 8.1 `AgentState` (`services/codeIntel/types.ts`)
 
