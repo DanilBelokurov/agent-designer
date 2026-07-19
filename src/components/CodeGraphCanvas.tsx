@@ -6,6 +6,12 @@
 // collapsed by default — toggleable via the toolbar, persisted in
 // `useUiStore.compoundsCollapsed`.
 //
+// Interactive: nodes are draggable (GraphFocus-style "you can rearrange
+// things"). User-dragged positions are debounced (400 ms) into
+// `.agent-graph/manual-positions.json` and replayed on every open.
+// `manualPositions` always win over the dagre layout; the "Auto layout"
+// button in the bottom-left controls clears them and reruns dagre.
+//
 // Performance: with thousands of entities (real projects produce 5K–15K)
 // we need to keep the rendered DOM small. Two complementary mechanisms:
 //   1. Collapsed compounds omit their children entirely.
@@ -13,10 +19,17 @@
 // Plus aggressive defaults (only architectural kinds visible) and
 // `React.memo` on EntityNode so re-renders stay local.
 
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ReactFlow, Background, Controls, MiniMap } from 'reactflow';
-import type { Node, Edge, NodeProps, NodeTypes } from 'reactflow';
+import type {
+  Node,
+  Edge,
+  NodeChange,
+  NodeProps,
+  NodeTypes,
+} from 'reactflow';
 import { useReactFlow as useReactFlowNamed } from 'reactflow';
+import { applyNodeChanges } from 'reactflow';
 import {
   Box, Braces, ChevronDown, ChevronUp, Cog, Cpu, FunctionSquare, GitBranch, Hash, Layers, Maximize2, Minimize2, Package, Tag, Type, Variable,
 } from 'lucide-react';
@@ -233,6 +246,9 @@ export default function CodeGraphCanvas() {
   const state = useCodeGraphStore((s) => s.state);
   const layoutPositions = useCodeGraphStore((s) => s.layoutPositions);
   const setLayout = useCodeGraphStore((s) => s.setLayout);
+  const manualPositions = useCodeGraphStore((s) => s.manualPositions);
+  const setManualPositions = useCodeGraphStore((s) => s.setManualPositions);
+  const clearManualPositions = useCodeGraphStore((s) => s.clearManualPositions);
   const filters = useUiStore((s) => s.graphFilters);
   const collapsedSet = useUiStore((s) => s.compoundsCollapsed);
   const toggleCompoundCollapse = useUiStore((s) => s.toggleCompoundCollapse);
@@ -253,7 +269,7 @@ export default function CodeGraphCanvas() {
     return ids;
   }, [state]);
 
-  const { nodes, edges, lastEntityCount } = useMemo(() => {
+  const { nodes: autoNodes, edges, lastEntityCount } = useMemo(() => {
     if (!state || state.entities.length === 0) {
       return { nodes: [] as Node<EntityNodeData>[], edges: [] as Edge[], lastEntityCount: 0 };
     }
@@ -288,6 +304,16 @@ export default function CodeGraphCanvas() {
       // exists to avoid.
       positions = computeLayoutPositions(visible, visibleRelations);
     }
+
+    // Overlay user-dragged positions on top of the dagre layout. Manual
+    // overrides always win — that's the whole point of having a separate
+    // file. We don't merge into the cached layout positions because the
+    // canvas only needs the *effective* position per entity id.
+    if (manualPositions && manualPositions.size > 0) {
+      const overlaid = new Map(positions);
+      for (const [id, pos] of manualPositions) overlaid.set(id, pos);
+      positions = overlaid;
+    }
     const t3 = performance.now();
 
     // Compute visible-child-count per container for the badge.
@@ -316,7 +342,7 @@ export default function CodeGraphCanvas() {
         type: 'entity',
         position: pos,
         data: { entity: e, color, compound: parentWillRender, collapsed },
-        draggable: false,
+        draggable: true,
         selectable: true,
         ...(parentWillRender
           ? { parentNode: parentId!, extent: 'parent' as const }
@@ -366,13 +392,91 @@ export default function CodeGraphCanvas() {
     }
 
     return { nodes: flowNodes, edges: flowEdges, lastEntityCount: visible.length };
-  }, [state, filters, collapsedSet, layoutPositions]);
+  }, [state, filters, collapsedSet, layoutPositions, manualPositions]);
+
+  // ─── Drag-to-rearrange ────────────────────────────────────────────────
+  // `autoNodes` is the source of truth for *default* positions (dagre
+  // + manual override overlay). The local `nodes` state is what ReactFlow
+  // actually renders — it diverges from `autoNodes` while the user drags
+  // a node, then we sync back when `autoNodes` changes (filters /
+  // collapsed / new layout cache).
+  //
+  // On drag we (a) update local state immediately via applyNodeChanges,
+  // and (b) accumulate position updates in a ref, flushing them to
+  // `.agent-graph/manual-positions.json` after a 400 ms quiet period.
+  // We don't write to the store mid-drag because ReactFlow emits position
+  // changes every pointermove and we'd hammer the disk.
+  const [nodes, setNodes] = useState<Node<EntityNodeData>[]>(autoNodes);
+  const pendingManualRef = useRef<Map<string, LayoutPosition>>(new Map());
+  const saveTimerRef = useRef<number | null>(null);
+
+  // When `autoNodes` changes (filters / collapsed / new layout cache),
+  // merge them into `nodes` while preserving any position the user has
+  // already dragged. The lookup uses current `nodes` (which includes the
+  // user's most recent drag), not the store — otherwise the in-flight
+  // drag would be reverted by an `autoNodes` recompute.
+  useEffect(() => {
+    setNodes((current) => {
+      if (current.length === 0) return autoNodes;
+      const byId = new Map(current.map((n) => [n.id, n]));
+      const merged = autoNodes.map((auto) => {
+        const existing = byId.get(auto.id);
+        if (!existing) return auto;
+        // Keep the user's dragged position; let everything else (style,
+        // data, parentNode, etc.) refresh from `autoNodes`.
+        return { ...auto, position: existing.position };
+      });
+      return merged;
+    });
+  }, [autoNodes]);
+
+  const onNodesChange = useCallback((changes: NodeChange[]) => {
+    setNodes((nds) => applyNodeChanges(changes, nds));
+
+    // Collect position updates. We only persist on drag-end (`!dragging`)
+    // to keep the debounce window short and predictable. Mid-drag updates
+    // also enter `pendingManualRef` so a fast drag-and-release doesn't
+    // miss the final position.
+    for (const change of changes) {
+      if (change.type === 'position' && change.position) {
+        pendingManualRef.current.set(change.id, { x: change.position.x, y: change.position.y });
+      }
+    }
+    if (pendingManualRef.current.size === 0) return;
+
+    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => {
+      const pending = pendingManualRef.current;
+      pendingManualRef.current = new Map();
+      saveTimerRef.current = null;
+      if (pending.size === 0) return;
+      // Merge into the existing store-side manual positions so that a
+      // drag doesn't wipe positions for entities not currently visible
+      // (filter could hide them).
+      const current = useCodeGraphStore.getState().manualPositions ?? new Map();
+      const merged = new Map<string, LayoutPosition>(current);
+      for (const [k, v] of pending) merged.set(k, v);
+      void setManualPositions(merged, new Date().toISOString());
+    }, 400);
+  }, [setManualPositions]);
+
+  // Drop any pending write on unmount so the timer doesn't fire after
+  // the canvas is gone.
+  useEffect(() => () => {
+    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+  }, []);
 
   // Handle explicit auto-layout request — re-run dagre, persist to
   // `.agent-graph/layout.json`, and re-fit the viewport. With the cache
   // in place this is no longer the only way to layout — opening a fresh
   // scan already gives you pre-computed positions — but it's still the
   // escape hatch for "I want to re-shuffle this".
+  //
+  // "Auto layout" is the *only* way to throw away manual drag positions:
+  // it wipes `.agent-graph/manual-positions.json` via
+  // `clearManualPositions()` before recomputing dagre. Without this the
+  // recomputed layout would just get overlaid by stale manual positions
+  // and the user would see no change.
   useEffect(() => {
     if (autoLayoutRequested === 0 || lastEntityCount === 0) return;
     if (!state || !directory) {
@@ -385,6 +489,14 @@ export default function CodeGraphCanvas() {
     let cancelled = false;
     (async () => {
       try {
+        // Drop any pending debounced manual-position write so the wipe
+        // we issue next isn't immediately overwritten by a stale drag.
+        if (saveTimerRef.current !== null) {
+          window.clearTimeout(saveTimerRef.current);
+          saveTimerRef.current = null;
+        }
+        pendingManualRef.current = new Map();
+        await clearManualPositions();
         const cache = await computeAndCacheLayout(
           directory,
           state.entities,
@@ -406,7 +518,7 @@ export default function CodeGraphCanvas() {
     return () => {
       cancelled = true;
     };
-  }, [autoLayoutRequested, lastEntityCount, fitView, state, directory, setLayout]);
+  }, [autoLayoutRequested, lastEntityCount, fitView, state, directory, setLayout, clearManualPositions]);
 
   // Fit the viewport whenever a freshly-loaded project becomes visible. The
   // dependency on `state?.projectFingerprint` (not `nodes.length`) ensures
@@ -468,12 +580,13 @@ export default function CodeGraphCanvas() {
         zoomOnPinch
         zoomOnDoubleClick={false}
         proOptions={{ hideAttribution: true }}
-        nodesDraggable={false}
+        nodesDraggable={true}
         nodesConnectable={false}
         elementsSelectable
         edgesFocusable={false}
         onlyRenderVisibleElements
         elevateNodesOnSelect={false}
+        onNodesChange={onNodesChange}
         onNodeClick={onNodeClick}
       >
         <Background color="#1e293b" gap={20} size={1} />

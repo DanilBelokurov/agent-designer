@@ -14,6 +14,13 @@ import { create } from 'zustand';
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export interface LogEntry {
+  /** Monotonic sequence number — unique within a session even when
+   *  `ts` and `action` collide. Use this as the React `key` in
+   *  LogsViewPanel; `ts` is too coarse (millisecond resolution) to
+   *  differentiate events fired synchronously. Stamped automatically
+   *  by `emit`; optional in the input type so callers don't need to
+   *  set it. */
+  seq?: number;
   ts: number;
   level: LogLevel;
   action: string;
@@ -21,6 +28,11 @@ export interface LogEntry {
 }
 
 const MAX_BUFFER = 1000;
+
+/** Monotonic counter, incremented for every emitted entry. Starts at
+ *  0 per page load; never resets so two events fired in the same
+ *  millisecond always differ. */
+let seqCounter = 0;
 
 interface LogStoreState {
   entries: LogEntry[];
@@ -41,6 +53,10 @@ export const useLogStore = create<LogStoreState>((set) => ({
 }));
 
 function emit(entry: LogEntry): void {
+  // Stamp a monotonic sequence number BEFORE anything else — guarantees
+  // a unique React key even when two events share ts + action (e.g.
+  // two `directory.set` calls inside one microtask).
+  const stamped: LogEntry = { ...entry, seq: seqCounter++ };
   // 1. Console
   const prefix = `[${entry.action}]`;
   const payload = entry.details ?? {};
@@ -51,14 +67,15 @@ function emit(entry: LogEntry): void {
     default: console.debug(prefix, payload);
   }
   // 2. UI buffer
-  useLogStore.getState().push(entry);
-  // 3. Server (fire-and-forget)
+  useLogStore.getState().push(stamped);
+  // 3. Server (fire-and-forget) — use the stamped entry so server-side
+  // tooling can also dedupe by `seq`.
   try {
     if (typeof fetch !== 'undefined') {
       void fetch('/log', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(entry),
+        body: JSON.stringify(stamped),
       }).catch(() => {});
     }
   } catch {

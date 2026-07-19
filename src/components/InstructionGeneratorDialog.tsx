@@ -152,6 +152,7 @@ export default function InstructionGeneratorDialog({
         upstreamSummary: upstream.length ? upstream.join(', ') : undefined,
         downstreamSummary: downstream.length ? downstream.join(', ') : undefined,
         codeState,
+        userRequest,
         onEnrichmentProgress: (current, total, entityName) => {
           setEnrichment({ current, total, entityName, phase: 'enriching' });
         },

@@ -33,13 +33,25 @@ const DEFAULT_FILTERS: GraphFilters = {
   archetypes: new Set<string>(),
 };
 
-interface UiState {
+export interface UiState {
   leftTab: LeftTab;
   graphFilters: GraphFilters;
   /** Compound node ids (class/interface/...) the user has collapsed. */
   compoundsCollapsed: Set<string>;
   /** Whether auto-layout should be applied automatically on next render. */
   autoLayoutRequested: number;
+  /**
+   * Which renderer the code-graph canvas uses. `sigma` (default for
+   * new sessions) is the WebGL path — handles 10k+ entities; `reactflow`
+   * is the legacy SVG path, kept as a fallback / comparison view.
+   */
+  codeGraphRenderer: 'sigma' | 'reactflow';
+  /**
+   * How Sigma colours nodes. `kind` mirrors the ReactFlow canvas;
+   * `language` uses a per-language GitHub-style palette; `community`
+   * runs Louvain over the graph and colours by cluster.
+   */
+  codeGraphColorMode: 'kind' | 'language' | 'community';
 
   setLeftTab: (tab: LeftTab) => void;
   resetToHarness: () => void;
@@ -55,6 +67,8 @@ interface UiState {
   expandAllCompounds: () => void;
   collapseAllCompounds: (ids: string[]) => void;
   requestAutoLayout: () => void;
+  setCodeGraphRenderer: (r: UiState['codeGraphRenderer']) => void;
+  setCodeGraphColorMode: (m: UiState['codeGraphColorMode']) => void;
 }
 
 function toggleSet<T>(s: Set<T>, value: T): Set<T> {
@@ -69,6 +83,8 @@ export const useUiStore = create<UiState>((set) => ({
   graphFilters: DEFAULT_FILTERS,
   compoundsCollapsed: new Set<string>(),
   autoLayoutRequested: 0,
+  codeGraphRenderer: 'sigma',
+  codeGraphColorMode: 'kind',
 
   setLeftTab: (tab) => {
     logger.info('ui.tab.switch', { tab });
@@ -104,6 +120,8 @@ export const useUiStore = create<UiState>((set) => ({
   expandAllCompounds: () => set({ compoundsCollapsed: new Set() }),
   collapseAllCompounds: (ids) => set({ compoundsCollapsed: new Set(ids) }),
   requestAutoLayout: () => set((s) => ({ autoLayoutRequested: s.autoLayoutRequested + 1 })),
+  setCodeGraphRenderer: (r) => set({ codeGraphRenderer: r }),
+  setCodeGraphColorMode: (m) => set({ codeGraphColorMode: m }),
 }));
 
 export const ALL_KINDS: ReadonlyArray<EntityKind> = [

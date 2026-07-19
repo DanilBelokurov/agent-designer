@@ -105,7 +105,7 @@ export default function LogsViewPanel() {
             No log entries yet. Trigger an action (scan, filter, generate) to see logs.
           </div>
         ) : (
-          filtered.map((e) => <LogRow key={e.ts + ':' + e.action} entry={e} />)
+          filtered.map((e) => <LogRow key={e.seq} entry={e} />)
         )}
       </div>
     </div>

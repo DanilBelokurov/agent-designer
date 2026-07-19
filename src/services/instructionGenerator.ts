@@ -11,6 +11,7 @@
 
 import type { AppNode } from '../types';
 import type { AgentState, CodeEntity } from './codeIntel/types';
+import type { Intent } from './codeIntel/intentSearch';
 import type { SemanticInfo } from './semanticCache';
 import { collectContextForNode } from './codeIntel/contextCollector';
 import agentTemplate from '../../templates/agent-template.md?raw';
@@ -211,6 +212,12 @@ interface BuildPromptInput {
    * have the block handy.
    */
   precomputedCodeContext?: string | null;
+  /**
+   * User-supplied free-form request text. Passed through to the context
+   * collector so it can run intent-based search (e.g. "external REST
+   * module" → find RestClient / HttpGateway / ExternalApiAdapter).
+   */
+  userRequest?: string;
   /** Forwarded to `collectContextForNode` — invoked after each entity's enrichment completes. */
   onEnrichmentProgress?: (
     current: number,
@@ -277,6 +284,7 @@ export async function buildPromptForNode(
   let codeContextMarkdown: string | null = null;
   let collectedEntityCount = 0;
   let collectedEntities: CodeEntity[] = [];
+  let detectedIntents: Intent[] = [];
 
   if (input.precomputedCodeContext !== undefined) {
     codeContextMarkdown = input.precomputedCodeContext ?? null;
@@ -285,10 +293,12 @@ export async function buildPromptForNode(
       enrichPoolSize: input.enrichPoolSize,
       model: input.model,
       onProgress: input.onEnrichmentProgress,
+      userRequest: input.userRequest,
     });
     collectedEntityCount = collected.entityCount;
     collectedEntities = collected.entities;
     codeContextMarkdown = collected.entityCount > 0 ? collected.markdown : null;
+    detectedIntents = collected.intents;
   }
 
   // Pick a "primary anchor" entity whose name matches what the user
@@ -326,23 +336,30 @@ export async function buildPromptForNode(
   }
 
   if (node.type === 'skill') {
+    const intentNote = detectedIntents.length > 0
+      ? `\n- Recognised intent(s) from the user request: ${detectedIntents.map((i) => `\`${i.id}\` (${i.label})`).join(', ')}. ` +
+        `Ground the skill in the entities surfaced under "Discovered by intent" in \`## Project Code Context\`.`
+      : '';
     lines.push(
       '## Skill — Required Frontmatter',
       '- `name` REQUIRED, snake_case — use the Slug provided above.',
-      '- `description` REQUIRED — one line, when and how to use this skill.',
+      '- `description` REQUIRED — one line, when and how to use this skill. Write it so a reader who has never seen the codebase understands when to reach for this skill.',
       '- `priority` OPTIONAL — integer 1-100, omit if unsure.',
       '',
       '## Skill — Required Body Sections',
       '- `# <title>` matching the label in human-readable form.',
-      '- `## Instructions` — clear, step-by-step guidance. Pull behaviour, naming, and ' +
-        'parameter shape from the `## Project Code Context` block above.',
+      '- `## Instructions` — clear, step-by-step guidance. Pull behaviour, naming, parameter shape, error handling, and edge cases from the `## Project Code Context` block above.' +
+        intentNote,
       '- `## Examples` — **REQUIRED**. Every example MUST be a runnable snippet (input → output, ' +
         'or call → response) and MUST use the EXACT symbols (function / class / method names, ' +
         'parameter names, return shapes) you saw in `## Project Code Context`. Do not invent APIs. ' +
         (anchorEntity
           ? 'Anchor on `' + anchorEntity.name + '` — you have its full body in the context. '
-          : '') +
-        'Provide 2-4 examples that cover happy-path + at least one edge case. ' +
+          : detectedIntents.length > 0
+            ? 'No exact-name anchor — use the entities under "Discovered by intent" as your anchor. '
+            : '') +
+        'Provide 2-4 examples that cover happy-path + at least one edge case (timeout, retry, error response, ' +
+        'or whatever failure mode the surfaced code actually handles). ' +
         'Show enough surrounding code that a reader can run the snippet without guessing.',
       '',
     );

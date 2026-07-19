@@ -2,25 +2,55 @@
 // `.agent-graph/state.json` and builds a Markdown-flavoured context snippet
 // for the instruction prompt.
 //
+// Two independent ranking passes feed the prompt:
+//   1. **Exact / fuzzy name match** against `node.label` / `functionName`
+//      — the original behaviour; works for skills named after the class
+//      they wrap ("CreateUserSkill" → `CreateUserService`).
+//   2. **Intent-based match** against the user's free-form request —
+//      `intentSearch` extracts semantic tags like `rest-client` / `auth` /
+//      `database` and matches entities by archetype + body/signature
+//      signals. This is what makes "Architecture of the external REST-
+//      interaction module" find the project's actual `RestClient`,
+//      `HttpGateway`, `ExternalApiAdapter` instead of nothing.
+//
+// Each pass is rendered under its own Markdown heading so Qwen can tell
+// `## Exact name match` (the primary anchor for `## Examples`) from
+// `## Discovered by intent` (additional context the user asked for).
+// When neither pass finds anything we fall back to a small set of the
+// project's top-level entities so the generator still has real code to
+// ground `## Examples` in.
+//
 // Async — enriches each picked entity through the local Qwen CLI (or its
 // cache) before rendering. Calls are sequential and report progress via
 // the optional `onProgress` callback.
-//
-// The Markdown block surfaces the new code-intel fields so the prompt
-// grounds Qwen in:
-//   - signature + body (ground truth),
-//   - archetype (controller / service / repository / …) learned per
-//     package or recovered from static heuristics,
-//   - modifiers / annotations (Kotlin/Java style labels),
-//   - semantic role + description (Qwen-derived).
 
 import type { AppNode } from '../../types';
 import type { AgentState, CodeEntity } from './types';
 import type { SemanticInfo } from './types';
 import { enrichEntitiesContext } from '../semanticEnricher';
+import {
+  findEntitiesForRequest,
+  type Intent,
+} from './intentSearch';
 
 const DEFAULT_LIMIT = 10;       // how many snippets land in the prompt
 const RELEVANT_POOL_SIZE = 15;  // how many candidates to enrich
+const INTENT_LIMIT = 8;        // how many intent matches land in the prompt
+const FALLBACK_LIMIT = 5;      // when neither pass finds anything, surface a few top entities by description length
+
+/**
+ * Pick the anchor name we expect the user's request to be about: skill's
+ * `functionName` if set, otherwise the raw label. Mirrors the helper of
+ * the same name in `instructionGenerator.ts` — kept duplicated here so
+ * the context collector doesn't depend on the prompt builder.
+ */
+function anchorNameFor(node: AppNode): string {
+  if (node.type === 'skill') {
+    const cfg = node.config as { functionName?: string };
+    if (cfg.functionName) return cfg.functionName;
+  }
+  return node.label;
+}
 
 function normalise(value: string): string {
   return value
@@ -68,6 +98,10 @@ export interface CollectedContext {
   entityCount: number;
   markdown: string;
   entities: CodeEntity[];
+  /** Which intent tags were recognised from the user's request (empty = none). */
+  intents: Intent[];
+  /** Which ranking pass produced the snippets — surfaced in the UI hint. */
+  source: 'exact-name' | 'intent' | 'fallback' | 'none';
 }
 
 export interface CollectOptions {
@@ -75,10 +109,21 @@ export interface CollectOptions {
   maxSnippets?: number;
   /** Cap on how many entities are sent to Qwen for enrichment. */
   enrichPoolSize?: number;
-  /** Skip the enrichment step entirely (uses stored semantic fields or none). */
+  /** Cap on how many intent-based matches land in the rendered Markdown. */
+  intentLimit?: number;
+  /**
+   * Skip the enrichment step entirely (uses stored semantic fields or none).
+   */
   skipEnrich?: boolean;
   /** Qwen model id forwarded to enrichEntityContext. */
   model?: string;
+  /**
+   * User-supplied free-form request text. When present, intent search
+   * runs against it AND the node label/description so skills with
+   * abstract names ("Architecture of the external REST module") can
+   * still find concrete entities.
+   */
+  userRequest?: string;
   onProgress?: (current: number, total: number, entityName: string, info: SemanticInfo) => void;
 }
 
@@ -159,23 +204,66 @@ export async function collectContextForNode(
 ): Promise<CollectedContext> {
   const maxSnippets = options.maxSnippets ?? DEFAULT_LIMIT;
   const poolSize = options.enrichPoolSize ?? RELEVANT_POOL_SIZE;
+  const intentLimit = options.intentLimit ?? INTENT_LIMIT;
   const candidates = codeNameCandidates(node);
 
-  const matched = state.entities
+  // -------- Pass 1: exact / fuzzy name match --------
+  const nameMatched = state.entities
     .map((e) => ({ e, score: scoreEntity(e, candidates) }))
     .filter((x) => x.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, poolSize);
 
-  if (matched.length === 0) {
-    return { entityCount: 0, markdown: '', entities: [] };
+  // -------- Pass 2: intent-based match against the user's request --------
+  // We feed intent search both the user request AND the node's own
+  // label/description so even an empty textarea benefits from the
+  // well-named skill ("ExternalRestSkill" → rest-client intent).
+  const intentInput = [options.userRequest ?? '', node.label]
+    .concat(node.type === 'skill' ? [(node.config as { description?: string }).description ?? ''] : [])
+    .join('\n');
+  const { intents, matches: intentMatched } = findEntitiesForRequest(intentInput, state.entities, {
+    limit: intentLimit,
+  });
+
+  // De-dupe: anything already surfaced by exact-name pass is dropped from
+  // the intent list so the user doesn't see the same snippet twice.
+  const nameIds = new Set(nameMatched.map((m) => m.e.id));
+  const intentOnly = intentMatched.filter((m) => !nameIds.has(m.entity.id));
+
+  // -------- Pass 3: fallback when neither pass found anything --------
+  // We surface top-level (no parent) entities with the longest Qwen
+  // description so the generator at least has *some* real code to
+  // ground `## Examples` in.
+  const needsFallback = nameMatched.length === 0 && intentOnly.length === 0;
+  let fallbackEntities: CodeEntity[] = [];
+  let detectedIntents: Intent[] = intents;
+  let source: CollectedContext['source'] = 'none';
+  if (needsFallback) {
+    fallbackEntities = state.entities
+      .filter((e) => e.kind !== 'file' && e.kind !== 'unknown')
+      .filter((e) => !e.parentId)
+      .sort((a, b) => (b.description?.length ?? 0) - (a.description?.length ?? 0))
+      .slice(0, FALLBACK_LIMIT);
+    if (fallbackEntities.length > 0) source = 'fallback';
+  } else if (nameMatched.length > 0) {
+    source = 'exact-name';
+  } else {
+    source = 'intent';
   }
 
-  const entities = matched.map((m) => m.e);
+  if (nameMatched.length === 0 && intentOnly.length === 0 && fallbackEntities.length === 0) {
+    return { entityCount: 0, markdown: '', entities: [], intents: detectedIntents, source: 'none' };
+  }
 
-  // Enrich sequentially via Qwen (or cache). Always returns one info per entity.
+  // Enrich the union. Cap the total to keep Qwen call count sane.
+  const allForEnrich: CodeEntity[] = [
+    ...nameMatched.map((m) => m.e),
+    ...intentOnly.map((m) => m.entity),
+    ...fallbackEntities,
+  ].slice(0, poolSize);
+
   const enriched = options.skipEnrich
-    ? entities.map((e) => ({
+    ? allForEnrich.map((e) => ({
         entity: e,
         info: {
           entityId: e.id,
@@ -184,39 +272,92 @@ export async function collectContextForNode(
           timestamp: 0,
         } satisfies SemanticInfo,
       }))
-    : await enrichEntitiesContext(entities, state, options.onProgress, { model: options.model });
+    : await enrichEntitiesContext(allForEnrich, state, options.onProgress, { model: options.model });
 
-  // Re-rank: bump entities that survived enrichment with a recognised role
-  // and have a non-empty description.
-  enriched.sort((a, b) => {
-    const roleBonus = (info: SemanticInfo) =>
-      info.role && info.role !== 'unknown' ? 5 : 0;
-    const descBonus = (info: SemanticInfo) =>
-      info.description && info.description.length > 5 ? 1 : 0;
-    const scoreA = roleBonus(a.info) + descBonus(a.info);
-    const scoreB = roleBonus(b.info) + descBonus(b.info);
-    return scoreB - scoreA;
-  });
+  // Build lookup by entity id so each section picks up the enriched info
+  // for its own entities.
+  const infoById = new Map(enriched.map((x) => [x.entity.id, x.info]));
 
-  const picked = enriched.slice(0, maxSnippets);
-  if (picked.length === 0) {
-    return { entityCount: 0, markdown: '', entities: [] };
+  // Re-rank each section independently: within a section, bump entities
+  // that survived enrichment with a recognised role + non-empty description.
+  function rerank<T extends { entity: CodeEntity }>(items: T[]): T[] {
+    const scored = items.map((x) => {
+      const info = infoById.get(x.entity.id);
+      const roleBonus = info && info.role && info.role !== 'unknown' ? 5 : 0;
+      const descBonus = info && info.description && info.description.length > 5 ? 1 : 0;
+      return { x, score: roleBonus + descBonus };
+    });
+    scored.sort((a, b) => b.score - a.score);
+    return scored.map((s) => s.x);
   }
+  const namePicked = rerank(nameMatched.map((m) => ({ entity: m.e }))).slice(0, maxSnippets);
+  const intentPicked = rerank(intentOnly.map((m) => ({ entity: m.entity, match: m }))).slice(0, intentLimit);
+  const fallbackPicked = rerank(fallbackEntities.map((e) => ({ entity: e }))).slice(0, FALLBACK_LIMIT);
 
   const lines: string[] = [
     `The user is documenting the **${node.type.replace('_', ' ')}** node labelled "${node.label}".`,
-    `Found ${picked.length} code entity(ies) below, each annotated by a local Qwen call with role + short description, and tagged with the file's archetype (controller / service / repository / …) when known.`,
-    '',
   ];
 
-  for (const { entity, info } of picked) {
-    lines.push(...renderEntityBlock(entity, info));
+  if (detectedIntents.length > 0) {
+    lines.push(
+      `Recognised user intent: ${detectedIntents.map((i) => `\`${i.id}\` (${i.label})`).join(', ')}.`,
+      '',
+    );
+  } else {
+    lines.push('');
   }
 
+  if (namePicked.length > 0) {
+    lines.push(
+      `### Exact name match (primary anchor for \`## Examples\`)`,
+      `Found ${namePicked.length} entity(ies) whose name matches \`${anchorNameFor(node)}\`. These are the strongest candidates — anchor the skill's examples on them.`,
+      '',
+    );
+    for (const { entity } of namePicked) {
+      const info = infoById.get(entity.id)!;
+      lines.push(...renderEntityBlock(entity, info));
+    }
+  }
+
+  if (intentPicked.length > 0) {
+    lines.push(
+      `### Discovered by intent (additional \`## Examples\` candidates)`,
+      `Found ${intentPicked.length} entity(ies) matching the recognised intent(s) above. Use their bodies for additional concrete examples that cover the user's described behaviour.`,
+      '',
+    );
+    for (const { entity, match } of intentPicked) {
+      const info = infoById.get(entity.id)!;
+      lines.push(`**Intent match:** \`${match.intent}\` (score ${match.score})`);
+      lines.push(...renderEntityBlock(entity, info));
+    }
+  }
+
+  if (namePicked.length === 0 && intentPicked.length === 0 && fallbackPicked.length > 0) {
+    lines.push(
+      `### No exact or intent match found — top-level entities by description depth`,
+      `Neither the node name nor the user request matched specific entities in the code graph. ` +
+        `The ${fallbackPicked.length} entity(ies) below are surfaced as a fallback — pick whichever ` +
+        `best fits the user's request and ground \`## Examples\` in them.`,
+      '',
+    );
+    for (const { entity } of fallbackPicked) {
+      const info = infoById.get(entity.id)!;
+      lines.push(...renderEntityBlock(entity, info));
+    }
+  }
+
+  const allEntities = [
+    ...namePicked.map((x) => x.entity),
+    ...intentPicked.map((x) => x.entity),
+    ...fallbackPicked.map((x) => x.entity),
+  ];
+
   return {
-    entityCount: picked.length,
+    entityCount: allEntities.length,
     markdown: lines.join('\n'),
-    entities: picked.map((x) => x.entity),
+    entities: allEntities,
+    intents: detectedIntents,
+    source,
   };
 }
 

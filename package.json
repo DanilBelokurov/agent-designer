@@ -14,10 +14,14 @@
   "dependencies": {
     "@types/dagre": "^0.7.54",
     "dagre": "^0.8.5",
+    "graphology": "^0.25.4",
+    "graphology-communities-louvain": "^2.0.2",
+    "graphology-types": "^0.24.8",
     "lucide-react": "^1.24.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "reactflow": "^11.11.4",
+    "sigma": "^3.0.3",
     "zustand": "^5.0.14"
   },
   "devDependencies": {

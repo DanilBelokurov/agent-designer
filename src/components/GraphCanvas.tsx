@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useMemo } from 'react';
+import { lazy, Suspense, useRef, useEffect, useCallback, useMemo } from 'react';
 import ReactFlow, {
   Background,
   Controls,
@@ -19,6 +19,11 @@ import NodePalette from './panels/NodePalette';
 import PropertiesPanel from './panels/PropertiesPanel';
 import Toolbar from './Toolbar';
 import CodeGraphCanvas from './CodeGraphCanvas';
+// Sigma.js + graphology together add ~175 KB. Code-split them so they
+// only load when the user actually flips the renderer to `sigma`. The
+// ReactFlow canvas stays in the main chunk.
+const SigmaGraphCanvas = lazy(() => import('./SigmaGraphCanvas'));
+import CodeRendererSwitcher from './CodeRendererSwitcher';
 import type { NodeType } from '../types';
 import { autoLayout } from '../utils/autoLayout';
 import { useCodeGraphStore } from '../store/useCodeGraphStore';
@@ -156,6 +161,7 @@ const GraphCanvas = () => {
   const { nodes, edges, selectedNodeId, onNodesChange, onEdgesChange, onConnect, addNode, selectNode, setNodesPositions } = useGraphStore();
   const directory = useFileSystemStore((s) => s.directory);
   const leftTab = useUiStore((s) => s.leftTab);
+  const codeGraphRenderer = useUiStore((s) => s.codeGraphRenderer);
 
   // Re-bind the semantic cache and the code-intel store to whichever project
   // folder is currently picked, and re-hydrate them from
@@ -274,7 +280,16 @@ const GraphCanvas = () => {
               minimapNodeColor={minimapNodeColor}
             />
           ) : (
-            <CodeGraphCanvas />
+            <>
+              {codeGraphRenderer === 'sigma' ? (
+                <Suspense fallback={<SigmaLoadingState />}>
+                  <SigmaGraphCanvas />
+                </Suspense>
+              ) : (
+                <CodeGraphCanvas />
+              )}
+              <CodeRendererSwitcher />
+            </>
           )}
         </div>
 
@@ -283,5 +298,16 @@ const GraphCanvas = () => {
     </div>
   );
 };
+
+function SigmaLoadingState() {
+  return (
+    <div className="flex h-full w-full items-center justify-center bg-slate-950">
+      <div className="text-center text-sm text-slate-400">
+        <div className="mb-2 inline-block h-5 w-5 animate-spin rounded-full border-2 border-indigo-500/40 border-t-indigo-400" />
+        <div>Loading WebGL renderer…</div>
+      </div>
+    </div>
+  );
+}
 
 export default GraphCanvas;

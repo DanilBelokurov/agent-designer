@@ -33,6 +33,12 @@ import {
   loadLayout,
   type LayoutPosition,
 } from '../services/codeIntel/layoutCache';
+import {
+  clearManualPositions as clearManualPositionsFile,
+  loadManualPositions,
+  saveManualPositions,
+  type ManualPositionsCache,
+} from '../services/codeIntel/manualPositions';
 import { logger } from '../services/logger';
 
 export type ScanPhase = 'idle' | 'scanning' | 'done' | 'error' | 'cancelled';
@@ -69,6 +75,15 @@ interface CodeGraphUIState {
   layoutPositions: Map<string, LayoutPosition> | null;
   /** ISO timestamp from the layout cache file. */
   layoutComputedAt: string | null;
+  /**
+   * User-dragged node positions, keyed by entity id. Loaded from
+   * `.agent-graph/manual-positions.json`. Wins over `layoutPositions`
+   * whenever both exist for the same entity. `null` when the user
+   * hasn't dragged anything yet (or after `clearManualPositions`).
+   */
+  manualPositions: Map<string, LayoutPosition> | null;
+  /** ISO timestamp from the manual-positions file. */
+  manualPositionsUpdatedAt: string | null;
 
   setProgress: (p: ScanProgressSnapshot) => void;
   setPhase: (p: ScanPhase, error?: string | null) => void;
@@ -76,6 +91,14 @@ interface CodeGraphUIState {
   setCacheHit: (v: boolean | null) => void;
   /** Update the in-memory layout cache (e.g. after `computeAndCacheLayout`). */
   setLayout: (positions: Map<string, LayoutPosition>, computedAt: string) => void;
+  /**
+   * Replace the in-memory manual positions and persist to
+   * `.agent-graph/manual-positions.json`. Pass an empty Map to clear
+   * the file on disk.
+   */
+  setManualPositions: (positions: Map<string, LayoutPosition>, updatedAt: string) => Promise<void>;
+  /** Forget manual positions both in memory and on disk. */
+  clearManualPositions: () => Promise<void>;
 
   /** Replace the state and persist atomically to state.json. */
   replaceState: (next: AgentState) => Promise<void>;
@@ -126,6 +149,33 @@ export const useCodeGraphStore = create<CodeGraphUIState>((set, get) => {
     }
   }
 
+  // Helper: load the user-dragged positions cache. Mirrors rehydrateLayout
+  // — same fingerprint key, same try/catch, just a different file.
+  async function rehydrateManualPositions(dir: ProjectDirectory, fingerprint: string) {
+    try {
+      const cache = await loadManualPositions(dir, fingerprint);
+      if (cache) {
+        const map = new Map<string, LayoutPosition>();
+        for (const [id, pos] of Object.entries(cache.positions)) {
+          map.set(id, pos);
+        }
+        set({ manualPositions: map, manualPositionsUpdatedAt: cache.updatedAt });
+        logger.info('manualPositions.loaded', {
+          fingerprint,
+          positions: map.size,
+          updatedAt: cache.updatedAt,
+        });
+      } else {
+        set({ manualPositions: null, manualPositionsUpdatedAt: null });
+      }
+    } catch (err) {
+      logger.warn('manualPositions.loadFailed', {
+        message: err instanceof Error ? err.message : String(err),
+      });
+      set({ manualPositions: null, manualPositionsUpdatedAt: null });
+    }
+  }
+
   return {
     state: null,
     phase: 'idle',
@@ -135,6 +185,8 @@ export const useCodeGraphStore = create<CodeGraphUIState>((set, get) => {
     cacheHit: null,
     layoutPositions: null,
     layoutComputedAt: null,
+    manualPositions: null,
+    manualPositionsUpdatedAt: null,
 
     setProgress: (p) => set({ progress: p }),
     setPhase: (p, error = null) => set({ phase: p, error }),
@@ -145,13 +197,53 @@ export const useCodeGraphStore = create<CodeGraphUIState>((set, get) => {
       set({ layoutPositions: positions, layoutComputedAt: computedAt });
     },
 
+    setManualPositions: async (positions, updatedAt) => {
+      set({ manualPositions: positions, manualPositionsUpdatedAt: updatedAt });
+      const dir = currentDir();
+      const fingerprint = get().state?.projectFingerprint;
+      if (!dir || !fingerprint) return;
+      try {
+        const cache: ManualPositionsCache = {
+          version: 1,
+          projectFingerprint: fingerprint,
+          updatedAt,
+          positions: Object.fromEntries(positions),
+        };
+        await saveManualPositions(dir, cache);
+      } catch (err) {
+        logger.warn('manualPositions.saveFailed', {
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
+    clearManualPositions: async () => {
+      set({ manualPositions: null, manualPositionsUpdatedAt: null });
+      const dir = currentDir();
+      if (!dir) return;
+      try {
+        await clearManualPositionsFile(dir);
+      } catch (err) {
+        logger.warn('manualPositions.clearFailed', {
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+
     replaceState: async (next) => {
       const prev = get().state;
-      // If the fingerprint changed, the cached layout no longer matches
-      // the entity set — drop it. The caller (`analyzeProject`) will
-      // recompute and write a fresh cache before returning.
+      // If the fingerprint changed, the cached layout AND the manual
+      // positions no longer match the entity set — drop both. The caller
+      // (`analyzeProject`) will recompute the dagre cache before
+      // returning; manual positions are the user's, so we just forget
+      // them rather than try to migrate stale ones.
       if (prev && prev.projectFingerprint !== next.projectFingerprint) {
-        set({ layoutPositions: null, layoutComputedAt: null });
+        set({
+          layoutPositions: null,
+          layoutComputedAt: null,
+          manualPositions: null,
+          manualPositionsUpdatedAt: null,
+        });
       }
       set({ state: next });
       const dir = currentDir();
@@ -162,6 +254,7 @@ export const useCodeGraphStore = create<CodeGraphUIState>((set, get) => {
           // standard scan path: saveAgentState → computeAndCacheLayout →
           // replaceState).
           await rehydrateLayout(dir, next.projectFingerprint);
+          await rehydrateManualPositions(dir, next.projectFingerprint);
         } catch (err) {
           // eslint-disable-next-line no-console
           console.warn('[useCodeGraphStore] saveAgentState failed:', err);
@@ -179,6 +272,8 @@ export const useCodeGraphStore = create<CodeGraphUIState>((set, get) => {
         cacheHit: null,
         layoutPositions: null,
         layoutComputedAt: null,
+        manualPositions: null,
+        manualPositionsUpdatedAt: null,
       });
       const dir = currentDir();
       if (dir) {
@@ -189,6 +284,11 @@ export const useCodeGraphStore = create<CodeGraphUIState>((set, get) => {
         }
         try {
           await clearLayout(dir);
+        } catch {
+          // ignore
+        }
+        try {
+          await clearManualPositionsFile(dir);
         } catch {
           // ignore
         }
@@ -206,6 +306,8 @@ export const useCodeGraphStore = create<CodeGraphUIState>((set, get) => {
         cacheHit: null,
         layoutPositions: null,
         layoutComputedAt: null,
+        manualPositions: null,
+        manualPositionsUpdatedAt: null,
       });
       setCurrentDir(dir);
       if (!dir) return;
@@ -220,6 +322,7 @@ export const useCodeGraphStore = create<CodeGraphUIState>((set, get) => {
           });
           set({ state: loaded, cacheHit: true });
           await rehydrateLayout(dir, loaded.projectFingerprint);
+          await rehydrateManualPositions(dir, loaded.projectFingerprint);
         } else {
           logger.info('directory.noState', { name: dir.name });
           set({ cacheHit: false });

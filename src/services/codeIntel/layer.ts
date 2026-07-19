@@ -122,14 +122,45 @@ function extractEntitiesForFile(
   const ext = filePath.slice(dot);
   const lang = languageForExtension(ext);
   if (!lang) return null;
+  let out: { entities: CodeEntity[]; relations: CodeRelation[] } | null = null;
   switch (lang.desc.langClass) {
     case 'brace':
-      return extractBraceLanguage(filePath, source, lang.key);
+      out = extractBraceLanguage(filePath, source, lang.key);
+      break;
     case 'indent':
-      return extractIndentLanguage(filePath, source, lang.key);
+      out = extractIndentLanguage(filePath, source, lang.key);
+      break;
     case 'markup':
       return null; // skip files we don't extract entities from
   }
+  // Guard against upstream duplicate-id emission. graphology and Sigma
+  // both throw on `addNode` with an existing id — much friendlier to
+  // crash here with the file path + offending id + duplicate count so
+  // we can pinpoint which extractor is misbehaving. Sigma's later
+  // `UsageGraphError` is harder to trace back to a source file.
+  if (out && out.entities.length > 1) {
+    const seen = new Map<string, number>();
+    for (const e of out.entities) {
+      seen.set(e.id, (seen.get(e.id) ?? 0) + 1);
+    }
+    const dupes: Array<[string, number]> = [];
+    for (const [id, n] of seen) if (n > 1) dupes.push([id, n]);
+    if (dupes.length > 0) {
+      const preview = dupes
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([id, n]) => `  ${id}  ×${n}`)
+        .join('\n');
+      throw new Error(
+        `[code-intel] Duplicate entity ids emitted by extractor for ${filePath} ` +
+          `(lang=${lang.key}, parser=${lang.desc.langClass}). ` +
+          `${dupes.length} duplicate id(s); top offenders:\n${preview}\n` +
+          `This is a bug in the extractor (startLine-based id collision). ` +
+          `The Sigma renderer would otherwise crash later with a generic graphology error.`,
+      );
+    }
+  }
+  return out;
 }
 
 function mergeEntities(
@@ -137,7 +168,25 @@ function mergeEntities(
   rels: CodeRelation[],
   additional: { entities: CodeEntity[]; relations: CodeRelation[] },
 ): void {
-  acc.push(...additional.entities);
+  // Type / module entities are emitted by every extractor call that
+  // references the same name — `type:python:str`, `mod:python:0`,
+  // etc. Each Python file containing `str` produces a fresh
+  // `type:python:str` and a reference relation to it. Without dedupe
+  // these multiply (140+ duplicates in real projects). The relations
+  // still work fine when they target an existing id — graphology treats
+  // them as pointers, not duplicate declarations — so we just skip the
+  // entity insert when we already have one.
+  const existing = new Set<string>();
+  for (const e of acc) {
+    if (e.kind === 'type' || e.kind === 'module') existing.add(e.id);
+  }
+  for (const e of additional.entities) {
+    if ((e.kind === 'type' || e.kind === 'module') && existing.has(e.id)) {
+      continue;
+    }
+    if (e.kind === 'type' || e.kind === 'module') existing.add(e.id);
+    acc.push(e);
+  }
   rels.push(...additional.relations);
 }
 
@@ -204,6 +253,7 @@ export async function analyzeProject(
 
   // Walk files, parse new/changed ones
   const stats: ScanStats = { scanned: 0, matched: 0, errors: 0 };
+  const seenPaths = new Set<string>();
   const filesToParse: string[] = [];
   for await (const filePath of walk(dir.handle, '')) {
     if (options.abort?.aborted) break;
@@ -211,6 +261,15 @@ export async function analyzeProject(
     const dot = filePath.lastIndexOf('.');
     if (dot < 0) continue;
     if (!languageForExtension(filePath.slice(dot))) continue;
+    // `walk` is supposed to yield each path exactly once, but in
+    // practice (deeply nested directories, symlink cycles, or
+    // browser FS API quirks) we've seen the same path emitted 2–3
+    // times. De-dupe here — one extractor call per file is all we
+    // want, otherwise `extractBraceLanguage` / `extractIndentLanguage`
+    // each emit a fresh `file:<path>` entity and triple the size of
+    // `entities` for no benefit.
+    if (seenPaths.has(filePath)) continue;
+    seenPaths.add(filePath);
     filesToParse.push(filePath);
     stats.matched += 1;
   }
@@ -242,6 +301,54 @@ export async function analyzeProject(
     processed += chunk.length;
     onProgress?.({ phase: 'extracting', current: processed, total });
     await new Promise((r) => setTimeout(r, 0));
+  }
+
+  // After the full pass, check for duplicate ids ACROSS files. Per-file
+  // dedupe inside the extractor is not enough — `src/config/settings.py`
+  // and `src/utils/settings.py` both legitimately emit `settings.py::class::Settings::6`,
+  // and only the merge step can catch that. We log a warning (not throw)
+  // because the rest of the pipeline still works with the survivor
+  // entity — Sigma/ReactFlow tolerate duplicates silently (ReactFlow
+  // dedupes by React key, Sigma via `if (graph.hasNode) continue;`),
+  // and throwing would block the whole scan.
+  if (entities.length > 0) {
+    const seen = new Map<string, { count: number; paths: Set<string> }>();
+    for (const e of entities) {
+      // type/module entities are intentionally cross-file — multiple
+      // files reference the same `str`, and only the FIRST file's
+      // entity survives (mergeEntities dedupes them). Their
+      // `filePath` is empty by extractor design, so counting them
+      // here would generate noise. Skip.
+      if (e.kind === 'type' || e.kind === 'module') continue;
+      const prev = seen.get(e.id);
+      if (prev) {
+        prev.count += 1;
+        prev.paths.add(e.filePath);
+      } else {
+        seen.set(e.id, { count: 1, paths: new Set([e.filePath]) });
+      }
+    }
+    const dupes: Array<{ id: string; count: number; paths: string[] }> = [];
+    for (const [id, info] of seen) {
+      if (info.count > 1) dupes.push({ id, count: info.count, paths: Array.from(info.paths) });
+    }
+    if (dupes.length > 0) {
+      dupes.sort((a, b) => b.count - a.count);
+      const top = dupes.slice(0, 5);
+      const preview = top
+        .map((d) => `  ${d.id}  ×${d.count}  [${d.paths.join(', ')}]`)
+        .join('\n');
+      logger.warn('analyze.crossFileDuplicateIds', {
+        duplicateCount: dupes.length,
+        totalEntities: entities.length,
+        top,
+      });
+      logger.warn(
+        `Cross-file duplicate entity ids: ${dupes.length} id(s) collide.\n${preview}\n` +
+          `Root cause: id schema = \${filePath}::\${kind}::\${name}::\${startLine} is not unique when two files share the same basename.\n` +
+          `Fix: prefix filePath with the project-relative directory (e.g. src/config/settings.py vs src/utils/settings.py).`,
+      );
+    }
   }
 
   // Apply archetype labels (used cached when not force-relearning).
@@ -483,3 +590,10 @@ export {
   LAYOUT_CACHE_VERSION,
 } from './layoutCache';
 export type { LayoutCache, LayoutPosition } from './layoutCache';
+export {
+  loadManualPositions,
+  saveManualPositions,
+  clearManualPositions,
+  MANUAL_POSITIONS_FILE_NAME,
+} from './manualPositions';
+export type { ManualPositionsCache } from './manualPositions';
